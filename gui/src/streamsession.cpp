@@ -28,8 +28,6 @@
 #define STEAMDECK_HAPTIC_CONNECT_DELAY_MS 1100
 #define NEW_DPAD_TOUCH_INTERVAL_MS 500
 #define DPAD_TOUCH_UPDATE_INTERVAL_MS 10
-#define MOUSE_STICK_UPDATE_INTERVAL_MS 16
-#define MOUSE_STICK_IDLE_INTERVAL_MS 48
 #define STEAMDECK_HAPTIC_PACKETS_PER_ANALYSIS 4 // send packets every interval * packets per analysis
 #define RUMBLE_HAPTICS_PACKETS_PER_RUMBLE 3
 #define STEAMDECK_HAPTIC_SAMPLING_RATE 3000
@@ -307,7 +305,7 @@ StreamSessionConnectInfo::StreamSessionConnectInfo(
 	const bool keyboard_controller_enabled_setting = settings->GetKeyboardEnabled();
 	this->keyboard_controller_enabled = keyboard_controller_enabled_setting;
 	this->mouse_touch_enabled = settings->GetMouseTouchEnabled();
-	this->mouse_left_stick_enabled = settings->GetMouseLeftStickEnabled();
+	this->mouse_options = settings->GetMouseStickOptions();
 	this->enable_keyboard = false;
 	this->enable_dualsense = true;
 	this->enable_idr_on_fec_failure = settings->GetIDROnFECFailureEnabled();
@@ -467,7 +465,7 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 #endif
 	audio_buffer_size = connect_info.audio_buffer_size;
 	mouse_touch_enabled = connect_info.mouse_touch_enabled;
-	mouse_left_stick_enabled = connect_info.mouse_left_stick_enabled;
+	mouse_options = connect_info.mouse_options;
 	keyboard_controller_enabled = connect_info.keyboard_controller_enabled;
 	host = connect_info.host;
 	QByteArray host_str = connect_info.host.toUtf8();
@@ -522,27 +520,28 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	mouse_stick_timer = new QTimer(this);
 	mouse_stick_timer->setTimerType(Qt::PreciseTimer);
 #ifdef Q_OS_WIN
-	event_mouse_input = qEnvironmentVariableIntValue("CHIAKI_MOUSE_EVENT_INPUT") == 1;
+	if(qEnvironmentVariableIsSet("CHIAKI_MOUSE_EVENT_INPUT"))
+		mouse_options.immediate = qEnvironmentVariableIntValue("CHIAKI_MOUSE_EVENT_INPUT") == 1;
+	if(qEnvironmentVariableIsSet("CHIAKI_MOUSE_RAW_INPUT"))
+		mouse_options.rawInput = qEnvironmentVariableIntValue("CHIAKI_MOUSE_RAW_INPUT") != 0;
 #endif
-	if(event_mouse_input)
-	{
-		mouse_stick_timer->setSingleShot(true);
-		mouse_stick_timer->setInterval(MOUSE_STICK_IDLE_INTERVAL_MS);
-		connect(mouse_stick_timer, &QTimer::timeout, this, [this] {
-			const auto now_us = chiaki_time_now_monotonic_us();
-			const auto idle_us = now_us - mouse_last_event_us;
-			constexpr uint64_t timeout_us = MOUSE_STICK_IDLE_INTERVAL_MS * 1000;
-			if(idle_us < timeout_us)
-				mouse_stick_timer->start(int((timeout_us - idle_us + 999) / 1000));
-			else
-				ResetMouseLeftStick();
-		});
-	}
-	else
-	{
-		mouse_stick_timer->setInterval(MOUSE_STICK_UPDATE_INTERVAL_MS);
-		connect(mouse_stick_timer, &QTimer::timeout, this, &StreamSession::UpdateMouseLeftStick);
-	}
+	mouse_stick_timer->setSingleShot(true);
+	mouse_stick_timer->setInterval(int(MouseStickMotion::SampleUs / 1000));
+	connect(mouse_stick_timer, &QTimer::timeout, this, [this] {
+		const QPointF delta = mouse_stick_delta;
+		mouse_stick_delta = {};
+		mouse_stick_sample_pending = false;
+		if(!delta.isNull())
+			ApplyMouseStick(delta, mouse_sample_begin_us);
+	});
+	mouse_release_timer = new QTimer(this);
+	mouse_release_timer->setTimerType(Qt::PreciseTimer);
+	mouse_release_timer->setSingleShot(true);
+	connect(mouse_release_timer, &QTimer::timeout, this, [this] {
+		const auto now_us = chiaki_time_now_monotonic_us();
+		SetMouseStickAxes(mouse_motion.at(now_us));
+		ScheduleMouseRelease(now_us);
+	});
 	chiaki_controller_state_set_idle(&touch_state);
 	touch_tracker=QMap<int, uint8_t>();
 	mouse_touch_id=-1;
@@ -930,152 +929,129 @@ void StreamSession::GoHome()
 
 void StreamSession::HandleMousePressEvent(QMouseEvent *event)
 {
-	if(!mouse_touch_enabled)
-		return;
-	// left button for touchpad gestures, others => touchpad click
-	if (event->button() != Qt::MouseButton::LeftButton)
-		mouse_touch_clicked = true;
+	mouse_buttons_held |= unsigned(event->button()) & 0x1f;
 	SendFeedbackState();
 }
 
 void StreamSession::HandleMouseReleaseEvent(QMouseEvent *event)
 {
-	if(!mouse_touch_enabled)
-		return;
-	// left button => end of touchpad gesture
-	if (event->button() == Qt::LeftButton)
+	mouse_buttons_held &= ~(unsigned(event->button()) & 0x1f);
+	if(event->button() == Qt::LeftButton && mouse_touch_id >= 0)
 	{
-		if(mouse_touch_id >= 0)
-		{
-			chiaki_controller_state_stop_touch(&keyboard_state, (uint8_t)mouse_touch_id);
-			mouse_touch_id = -1;
-		}
+		chiaki_controller_state_stop_touch(&keyboard_state, uint8_t(mouse_touch_id));
+		mouse_touch_id = -1;
 	}
-	mouse_touch_clicked = false;
 	SendFeedbackState();
 }
 
 void StreamSession::HandleMouseMoveEvent(QMouseEvent *event, qreal width, qreal height)
 {
-	if(!mouse_touch_enabled)
+	if(!mouse_touch_enabled || mouse_options.action(0) != 0 || event->buttons() != Qt::LeftButton || width <= 0 || height <= 0)
 		return;
-	// left button with move => touchpad gesture, otherwise ignore
-	if (event->buttons() == Qt::LeftButton)
-	{
-		float x = std::clamp(0.0, event->scenePosition().x(), width);
-		float y = std::clamp(0.0, event->scenePosition().y(), height);
-		float psx = x * (PS_TOUCHPAD_MAX_X / width);
-		float psy = y * (PS_TOUCHPAD_MAX_Y / height);
-		// if touch id is set, move, otherwise start
-		if(mouse_touch_id >= 0)
-			chiaki_controller_state_set_touch_pos(&keyboard_state, (uint8_t)mouse_touch_id, (uint16_t)psx, (uint16_t)psy);
-		else
-			mouse_touch_id=chiaki_controller_state_start_touch(&keyboard_state, (uint16_t)psx, (uint16_t)psy);	
-	}
+	const auto position = event->scenePosition();
+	const auto x = uint16_t(std::clamp(position.x() / width, 0.0, 1.0) * PS_TOUCHPAD_MAX_X);
+	const auto y = uint16_t(std::clamp(position.y() / height, 0.0, 1.0) * PS_TOUCHPAD_MAX_Y);
+	if(mouse_touch_id >= 0)
+		chiaki_controller_state_set_touch_pos(&keyboard_state, uint8_t(mouse_touch_id), x, y);
+	else
+		mouse_touch_id = chiaki_controller_state_start_touch(&keyboard_state, x, y);
 	SendFeedbackState();
 }
 
-bool StreamSession::UsesMouseLeftStick(Qt::MouseButtons buttons) const
+bool StreamSession::UsesMouseStick(Qt::MouseButtons buttons) const
 {
-	return mouse_left_stick_enabled && !(mouse_touch_enabled && buttons == Qt::LeftButton);
+	const bool touchpadGesture = mouse_touch_enabled && mouse_options.action(0) == 0 && buttons == Qt::LeftButton;
+	return mouse_options.mode != MouseStickMode::Off && !touchpadGesture;
 }
 
-void StreamSession::HandleMouseLeftStickMovement(const QPointF &delta)
+bool StreamSession::HasMouseButtonMapping(Qt::MouseButton button) const
+{
+	return mouseButtonActions(mouse_options, unsigned(button), mouse_touch_enabled) != 0;
+}
+
+void StreamSession::HandleMouseStickMovement(const QPointF &delta)
 {
 	if(delta.isNull())
 		return;
-	const uint64_t begin_us = chiaki_latency_begin();
-	if(event_mouse_input)
+	const auto begin_us = chiaki_latency_begin();
+	if(mouse_options.immediate)
 	{
-		const uint64_t now_us = chiaki_time_now_monotonic_us();
-		constexpr uint64_t sample_us = MOUSE_STICK_UPDATE_INTERVAL_MS * 1000;
-		// Retain the old speed-to-tilt scale at steady speed without waiting
-		// for a sampling window. The first event uses its own displacement.
-		const uint64_t interval_us = mouse_last_event_us && now_us >= mouse_last_event_us
-			? std::clamp(now_us - mouse_last_event_us, uint64_t{1000}, sample_us)
-			: sample_us;
-		mouse_last_event_us = now_us;
-		if(!mouse_stick_timer->isActive())
-			mouse_stick_timer->start(MOUSE_STICK_IDLE_INTERVAL_MS);
-		ApplyMouseLeftStick(delta * (qreal(sample_us) / interval_us), begin_us);
+		ApplyMouseStick(delta, begin_us);
 		return;
 	}
 	if(!mouse_stick_sample_pending)
+	{
 		mouse_sample_begin_us = begin_us;
-	mouse_stick_delta += delta;
-	mouse_stick_sample_pending = true;
-	mouse_stick_activity.start();
-	if(!mouse_stick_timer->isActive())
 		mouse_stick_timer->start();
-}
-
-void StreamSession::UpdateMouseLeftStick()
-{
-	if(mouse_stick_activity.hasExpired(MOUSE_STICK_IDLE_INTERVAL_MS))
-	{
-		ResetMouseLeftStick();
-		return;
+		mouse_stick_sample_pending = true;
 	}
-	if(!mouse_stick_sample_pending)
-		return;
-
-	const QPointF delta = mouse_stick_delta;
-	mouse_stick_delta = QPointF();
-	mouse_stick_sample_pending = false;
-	ApplyMouseLeftStick(delta, mouse_sample_begin_us);
+	mouse_stick_delta += delta;
 }
 
-void StreamSession::ApplyMouseLeftStick(const QPointF &delta, uint64_t begin_us)
+void StreamSession::ApplyMouseStick(const QPointF &delta, uint64_t begin_us)
 {
-	constexpr qreal full_tilt_pixels = 24.0;
-	const qreal distance = std::hypot(delta.x(), delta.y());
-	const QPoint axes = (delta * (0x7fff / std::max(full_tilt_pixels, distance))).toPoint();
-	if(axes == mouse_stick_axes)
-		return;
-	mouse_stick_axes = axes;
-	SendFeedbackState();
-	chiaki_latency_end(CHIAKI_LATENCY_mouse_to_state, begin_us);
+	const auto now_us = chiaki_time_now_monotonic_us();
+	if(SetMouseStickAxes(mouse_motion.move(mouse_options, delta.x(), delta.y(), now_us, aiming)))
+		chiaki_latency_end(CHIAKI_LATENCY_mouse_to_state, begin_us);
+	if(!mouse_release_timer->isActive())
+		ScheduleMouseRelease(now_us);
 }
 
-void StreamSession::ResetMouseLeftStick()
+bool StreamSession::SetMouseStickAxes(MouseStickAxes axes)
+{
+	const QPoint next(qRound(32767 * axes.x), qRound(32767 * axes.y));
+	if(next == mouse_stick_axes)
+		return false;
+	mouse_stick_axes = next;
+	SendFeedbackState();
+	return true;
+}
+
+void StreamSession::ScheduleMouseRelease(uint64_t now_us)
+{
+	const auto next = mouse_motion.nextReleaseTick(now_us);
+	if(next > now_us)
+		mouse_release_timer->start(int((next - now_us + 999) / 1000));
+}
+
+void StreamSession::ResetMouseStick()
 {
 	mouse_stick_timer->stop();
-	mouse_stick_delta = QPointF();
+	mouse_release_timer->stop();
+	mouse_stick_delta = {};
 	mouse_stick_sample_pending = false;
-	mouse_last_event_us = 0;
 	mouse_sample_begin_us = 0;
-	if(mouse_stick_axes.isNull())
-		return;
-	mouse_stick_axes = QPoint();
-	SendFeedbackState();
+	mouse_motion.reset();
+	SetMouseStickAxes({0, 0});
 }
 
-void StreamSession::ResetMouseInput()
+void StreamSession::ResetMouseInput(bool releaseKeyboard)
 {
-	const bool touch_active = mouse_touch_id >= 0;
-	const bool touch_clicked = mouse_touch_clicked;
-	if(touch_active)
+	if(mouse_touch_id >= 0)
 	{
-		chiaki_controller_state_stop_touch(&keyboard_state, (uint8_t)mouse_touch_id);
+		chiaki_controller_state_stop_touch(&keyboard_state, uint8_t(mouse_touch_id));
 		mouse_touch_id = -1;
 	}
-	mouse_touch_clicked = false;
-	const bool stick_active = !mouse_stick_axes.isNull();
-	ResetMouseLeftStick();
-	if(!stick_active && (touch_active || touch_clicked))
-		SendFeedbackState();
+	mouse_buttons_held = 0;
+	if(releaseKeyboard)
+	{
+		keyboard_directions_held = 0;
+		chiaki_controller_state_set_idle(&keyboard_state);
+	}
+	ResetMouseStick();
+	SendFeedbackState();
 }
 
 ChiakiControllerState StreamSession::GetKeyboardMouseState() const
 {
 	auto state = keyboard_state;
-	if(mouse_touch_clicked)
-		state.buttons |= CHIAKI_CONTROLLER_BUTTON_TOUCHPAD;
-	if(!state.left_x && !state.left_y)
-	{
-		state.left_x = mouse_stick_axes.x();
-		state.left_y = mouse_stick_axes.y();
-	}
+	const uint32_t actions = mouseButtonActions(mouse_options, mouse_buttons_held, mouse_touch_enabled);
+	state.buttons |= actions & ((1u << CHIAKI_CONTROLLER_BUTTONS_COUNT) - 1);
+	if(actions & CHIAKI_CONTROLLER_ANALOG_BUTTON_L2)
+		state.l2_state = 0xff;
+	if(actions & CHIAKI_CONTROLLER_ANALOG_BUTTON_R2)
+		state.r2_state = 0xff;
+	applyMouseStickAxes(state, mouse_options.mode, mouse_stick_axes.x(), mouse_stick_axes.y());
 	return state;
 }
 
@@ -1101,28 +1077,25 @@ void StreamSession::HandleKeyboardEvent(QKeyEvent *event)
 			keyboard_state.r2_state = press_event ? 0xff : 0;
 			break;
 		case static_cast<int>(ControllerButtonExt::ANALOG_STICK_RIGHT_Y_UP):
-			keyboard_state.right_y = press_event ? -0x7fff : 0;
-			break;
 		case static_cast<int>(ControllerButtonExt::ANALOG_STICK_RIGHT_Y_DOWN):
-			keyboard_state.right_y = press_event ? 0x7fff : 0;
-			break;
 		case static_cast<int>(ControllerButtonExt::ANALOG_STICK_RIGHT_X_UP):
-			keyboard_state.right_x = press_event ? 0x7fff : 0;
-			break;
 		case static_cast<int>(ControllerButtonExt::ANALOG_STICK_RIGHT_X_DOWN):
-			keyboard_state.right_x = press_event ? -0x7fff : 0;
-			break;
 		case static_cast<int>(ControllerButtonExt::ANALOG_STICK_LEFT_Y_UP):
-			keyboard_state.left_y = press_event ? -0x7fff : 0;
-			break;
 		case static_cast<int>(ControllerButtonExt::ANALOG_STICK_LEFT_Y_DOWN):
-			keyboard_state.left_y = press_event ? 0x7fff : 0;
-			break;
 		case static_cast<int>(ControllerButtonExt::ANALOG_STICK_LEFT_X_UP):
-			keyboard_state.left_x = press_event ? 0x7fff : 0;
-			break;
 		case static_cast<int>(ControllerButtonExt::ANALOG_STICK_LEFT_X_DOWN):
-			keyboard_state.left_x = press_event ? -0x7fff : 0;
+			if(press_event)
+				keyboard_directions_held |= button;
+			else
+				keyboard_directions_held &= ~unsigned(button);
+			keyboard_state.left_x = keyboardStickAxis(keyboard_directions_held,
+				unsigned(ControllerButtonExt::ANALOG_STICK_LEFT_X_UP), unsigned(ControllerButtonExt::ANALOG_STICK_LEFT_X_DOWN));
+			keyboard_state.left_y = keyboardStickAxis(keyboard_directions_held,
+				unsigned(ControllerButtonExt::ANALOG_STICK_LEFT_Y_DOWN), unsigned(ControllerButtonExt::ANALOG_STICK_LEFT_Y_UP));
+			keyboard_state.right_x = keyboardStickAxis(keyboard_directions_held,
+				unsigned(ControllerButtonExt::ANALOG_STICK_RIGHT_X_UP), unsigned(ControllerButtonExt::ANALOG_STICK_RIGHT_X_DOWN));
+			keyboard_state.right_y = keyboardStickAxis(keyboard_directions_held,
+				unsigned(ControllerButtonExt::ANALOG_STICK_RIGHT_Y_DOWN), unsigned(ControllerButtonExt::ANALOG_STICK_RIGHT_Y_UP));
 			break;
 		default:
 			if(press_event)
@@ -1430,6 +1403,7 @@ void StreamSession::DpadSendFeedbackState()
 		{
 			chiaki_controller_state_set_idle(&state);
 			chiaki_controller_state_set_idle(&keyboard_state);
+			keyboard_directions_held = 0;
 		}
 	}
 	if((dpad_touch_shortcut1 || dpad_touch_shortcut2 || dpad_touch_shortcut3 || dpad_touch_shortcut4) && (!dpad_touch_shortcut1 || (state.buttons & dpad_touch_shortcut1)) && (!dpad_touch_shortcut2 || (state.buttons & dpad_touch_shortcut2)) && (!dpad_touch_shortcut3 || (state.buttons & dpad_touch_shortcut3)) && (!dpad_touch_shortcut4 || (state.buttons & dpad_touch_shortcut4)))
@@ -1487,6 +1461,7 @@ void StreamSession::SendFeedbackState()
 		{
 			chiaki_controller_state_set_idle(&state);
 			chiaki_controller_state_set_idle(&keyboard_state);
+			keyboard_directions_held = 0;
 		}
 	}
 	if((dpad_touch_shortcut1 || dpad_touch_shortcut2 || dpad_touch_shortcut3 || dpad_touch_shortcut4) && (!dpad_touch_shortcut1 || (state.buttons & dpad_touch_shortcut1)) && (!dpad_touch_shortcut2 || (state.buttons & dpad_touch_shortcut2)) && (!dpad_touch_shortcut3 || (state.buttons & dpad_touch_shortcut3)) && (!dpad_touch_shortcut4 || (state.buttons & dpad_touch_shortcut4)))
@@ -1509,6 +1484,7 @@ void StreamSession::SendFeedbackState()
 			dpad_touch_stop_timer->start(NEW_DPAD_TOUCH_INTERVAL_MS);
 	}
 	chiaki_controller_state_or(&state, &state, &dpad_touch_state);
+	aiming = state.l2_state != 0;
 	chiaki_session_set_controller_state(&session, &state);
 }
 

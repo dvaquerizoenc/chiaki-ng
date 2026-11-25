@@ -1,12 +1,12 @@
 # Controller Configuration
 
-## Using the Mouse as the Left Stick
+## Using a Keyboard and Mouse
 
-In the desktop app, open **Settings → Keys** and enable **Mouse as left stick (L3)** before starting a stream. Move the mouse inside the stream window to tilt the left stick. Faster movement tilts it further, and the stick centers when the mouse stops. A keyboard binding for the left stick takes priority while held. The L3 button press still uses its own key binding.
+In the desktop app, open **Settings → Keys → Mouse controls** and choose **Right stick (camera)** for a PC-style layout. With **Keyboard as controller** and **WASD for left stick** enabled, WASD takes precedence over custom bindings for those keys. Left click sends R2 and right click sends L2 by default. L2 selects the separate horizontal and vertical aim sensitivities. The five mouse buttons can each be assigned a controller action.
 
-With **Enable Mouse Touchpad** turned on, dragging with the left mouse button controls the touchpad. On native Wayland the pointer stays where you move it, so reverse direction to bring it away from a screen edge.
+Choose **Left stick** for mouse-driven movement or **Disabled** to leave both sticks to the keyboard or gamepad. With **Enable Mouse Touchpad** on, an unassigned left button can still drag the touchpad. On native Wayland the pointer stays where you move it.
 
-On Windows, launch with `CHIAKI_MOUSE_EVENT_INPUT=1` to try applying mouse movement to the left stick as events arrive. This uses Raw Input when available. Set `CHIAKI_MOUSE_RAW_INPUT=0` to compare immediate Qt mouse events, or unset `CHIAKI_MOUSE_EVENT_INPUT` to return to the 16 ms sampling mode. Raw Input uses device counts, so pointer acceleration and DPI scaling can make the same physical motion feel different.
+**Process movement immediately** is enabled by default. Disable it to compare against 16 ms sampling. **Use Windows Raw Input** works with either stick. Raw Input uses device counts, so Windows pointer acceleration and DPI scaling can change how the Qt fallback feels. Set smoothing to 0 for an unfiltered response, and start with 0% deadzone compensation before adjusting it for the game. Reconnect the stream to apply changes. The `CHIAKI_MOUSE_EVENT_INPUT` and `CHIAKI_MOUSE_RAW_INPUT` environment variables still override the corresponding settings when present.
 
 During a stream, **Show stream stats** displays local latency percentiles and sample counts once a second. Set `CHIAKI_LATENCY_CSV` to a new file path before launching to export individual samples as `metric,value_ms`. Use a separate file per run. Frame age starts at decoded output and ends at frame mapping. Swap timings end when the application returns from the presentation call. Measure presentation on screen separately.
 

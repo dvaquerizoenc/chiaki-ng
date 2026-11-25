@@ -15,6 +15,7 @@ set(CHIAKI_UNIT_SOURCES
 				gkcrypt.c
 				takion.c
 				latency.c
+				mousestick.cpp
 				seqnum.c
 				keystate.c
 				feedback.c

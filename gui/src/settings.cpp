@@ -996,14 +996,43 @@ void Settings::SetMouseTouchEnabled(bool enabled)
 	settings.setValue("settings/mouse_touch_enabled", enabled);
 }
 
-bool Settings::GetMouseLeftStickEnabled() const
+MouseStickOptions Settings::GetMouseStickOptions() const
 {
-	return settings.value("settings/mouse_left_stick_enabled", false).toBool();
+	MouseStickOptions options;
+	const bool legacyLeft = settings.value("settings/mouse_left_stick_enabled", false).toBool();
+	options.mode = static_cast<MouseStickMode>(qBound(0, settings.value("settings/mouse_stick_mode", legacyLeft ? 1 : 0).toInt(), 2));
+	options.immediate = settings.value("settings/mouse_immediate", true).toBool();
+	options.rawInput = settings.value("settings/mouse_raw_input", true).toBool();
+	options.wasd = settings.value("settings/mouse_wasd", true).toBool();
+	options.horizontal = qBound(1, settings.value("settings/mouse_sensitivity_x", 100).toInt(), 400);
+	options.vertical = qBound(1, settings.value("settings/mouse_sensitivity_y", 100).toInt(), 400);
+	options.aimHorizontal = qBound(1, settings.value("settings/mouse_aim_sensitivity_x", 55).toInt(), 400);
+	options.aimVertical = qBound(1, settings.value("settings/mouse_aim_sensitivity_y", 55).toInt(), 400);
+	options.deadzone = qBound(0, settings.value("settings/mouse_deadzone", 0).toInt(), 40);
+	options.smoothingMs = qBound(0, settings.value("settings/mouse_smoothing_ms", 0).toInt(), 60);
+	for (size_t i = 0; i < options.buttons.size(); ++i) {
+		const int action = settings.value(QStringLiteral("settings/mouse_button_%1").arg(static_cast<int>(i)), MouseStickOptions::DefaultButton).toInt();
+		const int supported = (1 << (CHIAKI_CONTROLLER_BUTTONS_COUNT + 2)) - 1;
+		if (action == MouseStickOptions::DefaultButton || (action >= 0 && action <= supported && (action & (action - 1)) == 0))
+			options.buttons[i] = action;
+	}
+	return options;
 }
 
-void Settings::SetMouseLeftStickEnabled(bool enabled)
+void Settings::SetMouseStickOptions(const MouseStickOptions &options)
 {
-	settings.setValue("settings/mouse_left_stick_enabled", enabled);
+	settings.setValue("settings/mouse_stick_mode", static_cast<int>(options.mode));
+	settings.setValue("settings/mouse_immediate", options.immediate);
+	settings.setValue("settings/mouse_raw_input", options.rawInput);
+	settings.setValue("settings/mouse_wasd", options.wasd);
+	settings.setValue("settings/mouse_sensitivity_x", options.horizontal);
+	settings.setValue("settings/mouse_sensitivity_y", options.vertical);
+	settings.setValue("settings/mouse_aim_sensitivity_x", options.aimHorizontal);
+	settings.setValue("settings/mouse_aim_sensitivity_y", options.aimVertical);
+	settings.setValue("settings/mouse_deadzone", options.deadzone);
+	settings.setValue("settings/mouse_smoothing_ms", options.smoothingMs);
+	for (size_t i = 0; i < options.buttons.size(); ++i)
+		settings.setValue(QStringLiteral("settings/mouse_button_%1").arg(static_cast<int>(i)), options.buttons[i]);
 }
 
 
@@ -2455,6 +2484,17 @@ QMap<int, Qt::Key> Settings::GetControllerMapping()
 			result[static_cast<int>(chiaki_button)] = QKeySequence(settings.value("keymap/" + button_name).toString())[0].key();
 	}
 
+	const auto mouse = GetMouseStickOptions();
+	if (mouse.mode == MouseStickMode::Right && mouse.wasd) {
+		for (auto &key : result) {
+			if (key == Qt::Key_W || key == Qt::Key_A || key == Qt::Key_S || key == Qt::Key_D)
+				key = Qt::Key_unknown;
+		}
+		result[int(ControllerButtonExt::ANALOG_STICK_LEFT_Y_UP)] = Qt::Key_W;
+		result[int(ControllerButtonExt::ANALOG_STICK_LEFT_X_DOWN)] = Qt::Key_A;
+		result[int(ControllerButtonExt::ANALOG_STICK_LEFT_Y_DOWN)] = Qt::Key_S;
+		result[int(ControllerButtonExt::ANALOG_STICK_LEFT_X_UP)] = Qt::Key_D;
+	}
 	return result;
 }
 
@@ -2507,7 +2547,8 @@ QMap<Qt::Key, int> Settings::GetControllerMappingForDecoding()
 	QMap<Qt::Key, int> result;
 	for(auto it = map.begin(); it != map.end(); ++it)
 	{
-		result[it.value()] = it.key();
+		if (it.value() != Qt::Key_unknown)
+			result[it.value()] = it.key();
 	}
 	return result;
 }

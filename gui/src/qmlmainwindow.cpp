@@ -2866,7 +2866,7 @@ void QmlMainWindow::grabInput()
     grab_input++;
     mouse_stick_position_valid = false;
     if (session) {
-        session->ResetMouseInput();
+        session->ResetMouseInput(true);
         session->BlockInput(grab_input);
     }
 }
@@ -7819,18 +7819,17 @@ bool QmlMainWindow::nvidiaCard() const
     return nvidia_card;
 }
 
-void QmlMainWindow::resetMouseLeftStick()
+void QmlMainWindow::resetMouseStick()
 {
     mouse_stick_position_valid = false;
     if (session)
-        session->ResetMouseLeftStick();
+        session->ResetMouseStick();
 }
 
 #ifdef Q_OS_WIN
 void QmlMainWindow::updateRawMouseInput()
 {
-    static const bool enabled = qEnvironmentVariable("CHIAKI_MOUSE_RAW_INPUT") != QStringLiteral("0");
-    setRawMouseInput(enabled && session && session->UsesEventMouseInput() && session->UsesMouseLeftStick(Qt::NoButton));
+    setRawMouseInput(session && session->UsesRawMouseInput() && session->UsesMouseStick(Qt::NoButton));
 }
 
 void QmlMainWindow::setRawMouseInput(bool enabled)
@@ -7866,19 +7865,11 @@ bool QmlMainWindow::nativeEvent(const QByteArray &event_type, void *message, qin
         if (!raw_mouse_uses_legacy && session && has_video && !grab_input && isActive() &&
             (input.data.mouse.lLastX || input.data.mouse.lLastY) &&
             QRect(mapToGlobal(QPoint()), this->size()).contains(QCursor::pos())) {
-            Qt::MouseButtons buttons;
-            if (GetKeyState(VK_LBUTTON) < 0)
-                buttons |= Qt::LeftButton;
-            if (GetKeyState(VK_RBUTTON) < 0)
-                buttons |= Qt::RightButton;
-            if (GetKeyState(VK_MBUTTON) < 0)
-                buttons |= Qt::MiddleButton;
-            if (GetKeyState(VK_XBUTTON1) < 0)
-                buttons |= Qt::BackButton;
-            if (GetKeyState(VK_XBUTTON2) < 0)
-                buttons |= Qt::ForwardButton;
-            if (session->UsesMouseLeftStick(buttons)) {
-                session->HandleMouseLeftStickMovement(QPointF(input.data.mouse.lLastX, input.data.mouse.lLastY));
+            const bool touchpadDrag = !session->UsesMouseStick(Qt::LeftButton) && GetKeyState(VK_LBUTTON) < 0 &&
+                GetKeyState(VK_RBUTTON) >= 0 && GetKeyState(VK_MBUTTON) >= 0 &&
+                GetKeyState(VK_XBUTTON1) >= 0 && GetKeyState(VK_XBUTTON2) >= 0;
+            if (!touchpadDrag) {
+                session->HandleMouseStickMovement(QPointF(input.data.mouse.lLastX, input.data.mouse.lLastY));
                 chiaki_latency_end(CHIAKI_LATENCY_mouse_input, begin_us);
             }
         }
@@ -7890,13 +7881,13 @@ bool QmlMainWindow::nativeEvent(const QByteArray &event_type, void *message, qin
 }
 #endif
 
-void QmlMainWindow::handleMouseLeftStick(QMouseEvent *event)
+void QmlMainWindow::handleMouseStick(QMouseEvent *event)
 {
     const QPointF position = event->globalPosition();
     const QPoint cursor = position.toPoint();
     const QRect window_bounds(mapToGlobal(QPoint()), size());
     if (!window_bounds.contains(cursor)) {
-        resetMouseLeftStick();
+        resetMouseStick();
         return;
     }
 
@@ -7905,7 +7896,7 @@ void QmlMainWindow::handleMouseLeftStick(QMouseEvent *event)
         && (!raw_mouse_registered || raw_mouse_uses_legacy)
 #endif
     )
-        session->HandleMouseLeftStickMovement(position - mouse_stick_position);
+        session->HandleMouseStickMovement(position - mouse_stick_position);
     mouse_stick_position = position;
     mouse_stick_position_valid = true;
 
@@ -7942,10 +7933,10 @@ bool QmlMainWindow::event(QEvent *event)
     case QEvent::Hide:
         mouse_stick_position_valid = false;
         if (session)
-            session->ResetMouseInput();
+            session->ResetMouseInput(true);
         break;
     case QEvent::Leave:
-        resetMouseLeftStick();
+        resetMouseStick();
         break;
     case QEvent::MouseMove:
     case QEvent::MouseButtonPress:
@@ -7955,12 +7946,12 @@ bool QmlMainWindow::event(QEvent *event)
             return true;
         if (session && !grab_input) {
             const auto begin_us = chiaki_latency_begin();
-            const bool use_mouse_stick = has_video && isActive() && session->UsesMouseLeftStick(mouse_event->buttons());
+            const bool use_mouse_stick = has_video && isActive() && session->UsesMouseStick(mouse_event->buttons());
             if (!use_mouse_stick)
-                resetMouseLeftStick();
+                resetMouseStick();
             if (event->type() == QEvent::MouseMove) {
                 if (use_mouse_stick)
-                    handleMouseLeftStick(mouse_event);
+                    handleMouseStick(mouse_event);
                 else
                     session->HandleMouseMoveEvent(mouse_event, width(), height());
             } else if (event->type() == QEvent::MouseButtonPress) {
@@ -7977,16 +7968,27 @@ bool QmlMainWindow::event(QEvent *event)
         QGuiApplication::sendEvent(quick_window, event);
         break;
     }
-    case QEvent::MouseButtonDblClick:
-        if(!settings->GetFullscreenDoubleClickEnabled())
-            break;
+    case QEvent::MouseButtonDblClick: {
         if (session && !grab_input) {
-            if (windowState() != Qt::WindowFullScreen)
-                fullscreenTime();
-            else
-                normalTime();
+            auto *mouse_event = static_cast<QMouseEvent *>(event);
+            if (mouse_event->source() != Qt::MouseEventNotSynthesized)
+                return true;
+            if (session->HasMouseButtonMapping(mouse_event->button())) {
+                const auto begin_us = chiaki_latency_begin();
+                session->HandleMousePressEvent(mouse_event);
+                chiaki_latency_end(CHIAKI_LATENCY_mouse_input, begin_us);
+                return true;
+            }
+            if (mouse_event->button() == Qt::LeftButton && settings->GetFullscreenDoubleClickEnabled()) {
+                if (windowState() != Qt::WindowFullScreen)
+                    fullscreenTime();
+                else
+                    normalTime();
+                return true;
+            }
         }
         break;
+    }
     case QEvent::KeyPress:
         if (handleShortcut(static_cast<QKeyEvent*>(event)))
             return true;

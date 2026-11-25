@@ -809,15 +809,81 @@ void QmlSettings::setMouseTouchEnabled(bool enabled)
     emit mouseTouchEnabledChanged();
 }
 
-bool QmlSettings::mouseLeftStickEnabled() const
+QVariantMap QmlSettings::mouseStickOptions() const
 {
-    return settings->GetMouseLeftStickEnabled();
+    const auto options = settings->GetMouseStickOptions();
+    QVariantList buttons;
+    for (int action : options.buttons)
+        buttons.append(action);
+    return {{QStringLiteral("mode"), int(options.mode)},
+            {QStringLiteral("immediate"), options.immediate},
+            {QStringLiteral("rawInput"), options.rawInput},
+            {QStringLiteral("wasd"), options.wasd},
+            {QStringLiteral("horizontal"), options.horizontal},
+            {QStringLiteral("vertical"), options.vertical},
+            {QStringLiteral("aimHorizontal"), options.aimHorizontal},
+            {QStringLiteral("aimVertical"), options.aimVertical},
+            {QStringLiteral("deadzone"), options.deadzone},
+            {QStringLiteral("smoothingMs"), options.smoothingMs},
+            {QStringLiteral("buttons"), buttons}};
 }
 
-void QmlSettings::setMouseLeftStickEnabled(bool enabled)
+QVariantList QmlSettings::mouseButtonActions() const
 {
-    settings->SetMouseLeftStickEnabled(enabled);
-    emit mouseLeftStickEnabledChanged();
+    QVariantList actions;
+    const auto append = [&actions](int action, const QString &label) {
+        actions.append(QVariantMap{{QStringLiteral("action"), action}, {QStringLiteral("label"), label}});
+    };
+    append(MouseStickOptions::DefaultButton, tr("Mode default"));
+    append(0, tr("Unassigned"));
+    for (int bit = 0; bit < CHIAKI_CONTROLLER_BUTTONS_COUNT; ++bit)
+        append(1 << bit, Settings::GetChiakiControllerButtonName(1 << bit));
+    append(CHIAKI_CONTROLLER_ANALOG_BUTTON_L2, QStringLiteral("L2"));
+    append(CHIAKI_CONTROLLER_ANALOG_BUTTON_R2, QStringLiteral("R2"));
+    return actions;
+}
+
+void QmlSettings::setMouseStickOption(const QString &name, int value)
+{
+    auto options = settings->GetMouseStickOptions();
+    if (name == QStringLiteral("mode"))
+        options.mode = static_cast<MouseStickMode>(qBound(0, value, 2));
+    else if (name == QStringLiteral("immediate"))
+        options.immediate = value != 0;
+    else if (name == QStringLiteral("rawInput"))
+        options.rawInput = value != 0;
+    else if (name == QStringLiteral("wasd"))
+        options.wasd = value != 0;
+    else if (name == QStringLiteral("horizontal"))
+        options.horizontal = qBound(1, value, 400);
+    else if (name == QStringLiteral("vertical"))
+        options.vertical = qBound(1, value, 400);
+    else if (name == QStringLiteral("aimHorizontal"))
+        options.aimHorizontal = qBound(1, value, 400);
+    else if (name == QStringLiteral("aimVertical"))
+        options.aimVertical = qBound(1, value, 400);
+    else if (name == QStringLiteral("deadzone"))
+        options.deadzone = qBound(0, value, 40);
+    else if (name == QStringLiteral("smoothingMs"))
+        options.smoothingMs = qBound(0, value, 60);
+    else
+        return;
+    settings->SetMouseStickOptions(options);
+    emit mouseStickOptionsChanged();
+    if (name == QStringLiteral("mode") || name == QStringLiteral("wasd"))
+        emit controllerMappingChanged();
+}
+
+void QmlSettings::setMouseButtonAction(int button, int action)
+{
+    auto options = settings->GetMouseStickOptions();
+    const int supported = (1 << (CHIAKI_CONTROLLER_BUTTONS_COUNT + 2)) - 1;
+    if (button < 0 || size_t(button) >= options.buttons.size() ||
+        (action != MouseStickOptions::DefaultButton && (action < 0 || action > supported || (action & (action - 1)) != 0)))
+        return;
+    options.buttons[button] = action;
+    settings->SetMouseStickOptions(options);
+    emit mouseStickOptionsChanged();
 }
 
 bool QmlSettings::keyboardEnabled() const
@@ -1958,7 +2024,7 @@ void QmlSettings::refreshAllKeys()
     emit psnAuthTokenExpiryChanged();
     emit psnAccountIdChanged();
     emit mouseTouchEnabledChanged();
-    emit mouseLeftStickEnabledChanged();
+    emit mouseStickOptionsChanged();
     emit keyboardEnabledChanged();
     emit dpadTouchEnabledChanged();
     emit iDROnFECFailureEnabledChanged();

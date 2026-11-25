@@ -2235,7 +2235,7 @@ DialogView {
                             Keys.onPressed: (event) => {
                                 switch (event.key) {
                                 case Qt.Key_Down:
-                                    mouseLeftStick.forceActiveFocus(Qt.TabFocusReason);
+                                    mouseStickSelector.forceActiveFocus(Qt.TabFocusReason);
                                     event.accepted = true;
                                     break;
                                 case Qt.Key_Right:
@@ -2301,7 +2301,7 @@ DialogView {
                                         }
                                         break;
                                     case Qt.Key_Down:
-                                        mouseLeftStick.forceActiveFocus(Qt.TabFocusReason);
+                                        mouseStickSelector.forceActiveFocus(Qt.TabFocusReason);
                                         event.accepted = true;
                                         break;
                                     case Qt.Key_Return:
@@ -2348,7 +2348,7 @@ DialogView {
                                         }
                                         break;
                                     case Qt.Key_Down:
-                                        mouseLeftStick.forceActiveFocus(Qt.TabFocusReason);
+                                        mouseStickSelector.forceActiveFocus(Qt.TabFocusReason);
                                         event.accepted = true;
                                         break;
                                     case Qt.Key_Return:
@@ -2361,26 +2361,109 @@ DialogView {
                                 }
                             }
                         }
-                        CheckBox {
-                            id: mouseLeftStick
-                            text: qsTr("Mouse as left stick (L3)")
-                            checked: Chiaki.settings.mouseLeftStickEnabled
-                            onToggled: Chiaki.settings.mouseLeftStickEnabled = checked
+                        GroupBox {
+                            id: mouseControls
+                            title: qsTr("Mouse controls")
                             Layout.columnSpan: 3
-                            Layout.alignment: Qt.AlignRight
-                            Material.roundedScale: Material.SmallScale
-                            Material.background: visualFocus ? Material.accent : undefined
-                            onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
-                            KeyNavigation.up: mouseTouchpad
-                            Keys.onDownPressed: {
-                                const item = nextItemInFocusChain();
-                                if (item)
-                                    item.forceActiveFocus(Qt.TabFocusReason);
-                            }
-                            Keys.onReturnPressed: {
-                                if (visualFocus) {
-                                    toggle();
-                                    toggled();
+                            Layout.fillWidth: true
+                            property var options: Chiaki.settings.mouseStickOptions
+
+                            ColumnLayout {
+                                width: parent.width
+                                RowLayout {
+                                    Label { text: qsTr("Mouse movement") }
+                                    C.ComboBox {
+                                        id: mouseStickSelector
+                                        model: [qsTr("Disabled"), qsTr("Left stick"), qsTr("Right stick (camera)")]
+                                        currentIndex: mouseControls.options.mode
+                                        onActivated: (index) => Chiaki.settings.setMouseStickOption("mode", index)
+                                        onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                        KeyNavigation.up: mouseTouchpad
+                                    }
+                                    CheckBox {
+                                        text: qsTr("WASD for left stick")
+                                        enabled: mouseControls.options.mode === 2 && Chiaki.settings.keyboardEnabled
+                                        checked: mouseControls.options.wasd
+                                        onToggled: Chiaki.settings.setMouseStickOption("wasd", checked ? 1 : 0)
+                                        onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                    }
+                                }
+                                Label {
+                                    text: qsTr("In right-stick mode, the default buttons are left click for R2 and right click for L2. L2 selects aim sensitivity. Reconnect to apply changes.")
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                RowLayout {
+                                    enabled: mouseControls.options.mode !== 0
+                                    CheckBox {
+                                        text: qsTr("Process movement immediately")
+                                        checked: mouseControls.options.immediate
+                                        onToggled: Chiaki.settings.setMouseStickOption("immediate", checked ? 1 : 0)
+                                        onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                    }
+                                    CheckBox {
+                                        visible: Qt.platform.os === "windows"
+                                        text: qsTr("Use Windows Raw Input")
+                                        checked: mouseControls.options.rawInput
+                                        onToggled: Chiaki.settings.setMouseStickOption("rawInput", checked ? 1 : 0)
+                                        onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                    }
+                                }
+                                GridLayout {
+                                    columns: 3
+                                    enabled: mouseControls.options.mode !== 0
+                                    Repeater {
+                                        model: [
+                                            { key: "horizontal", label: qsTr("Horizontal (%)"), min: 1, max: 400 },
+                                            { key: "vertical", label: qsTr("Vertical (%)"), min: 1, max: 400 },
+                                            { key: "aimHorizontal", label: qsTr("Aim horizontal (%)"), min: 1, max: 400 },
+                                            { key: "aimVertical", label: qsTr("Aim vertical (%)"), min: 1, max: 400 },
+                                            { key: "deadzone", label: qsTr("Deadzone compensation (%)"), min: 0, max: 40 },
+                                            { key: "smoothingMs", label: qsTr("Smoothing (ms, 0 = off)"), min: 0, max: 60 }
+                                        ]
+                                        RowLayout {
+                                            required property var modelData
+                                            Label { text: parent.modelData.label }
+                                            SpinBox {
+                                                from: parent.modelData.min
+                                                to: parent.modelData.max
+                                                value: mouseControls.options[parent.modelData.key]
+                                                editable: true
+                                                Accessible.name: parent.modelData.label
+                                                onValueModified: Chiaki.settings.setMouseStickOption(parent.modelData.key, value)
+                                                onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                            }
+                                        }
+                                    }
+                                }
+                                GridLayout {
+                                    columns: 3
+                                    Repeater {
+                                        model: [qsTr("Left click"), qsTr("Right click"), qsTr("Middle click"), qsTr("Back button"), qsTr("Forward button")]
+                                        RowLayout {
+                                            id: mouseButtonRow
+                                            required property int index
+                                            required property string modelData
+                                            Label { text: mouseButtonRow.modelData }
+                                            C.ComboBox {
+                                                model: Chiaki.settings.mouseButtonActions
+                                                textRole: "label"
+                                                valueRole: "action"
+                                                Accessible.name: mouseButtonRow.modelData
+                                                currentIndex: {
+                                                    const action = mouseControls.options.buttons[mouseButtonRow.index];
+                                                    const actions = Chiaki.settings.mouseButtonActions;
+                                                    for (let i = 0; i < actions.length; ++i) {
+                                                        if (actions[i].action === action)
+                                                            return i;
+                                                    }
+                                                    return 0;
+                                                }
+                                                onActivated: Chiaki.settings.setMouseButtonAction(mouseButtonRow.index, currentValue)
+                                                onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2444,7 +2527,7 @@ DialogView {
                                                 break;
                                             case Qt.Key_Up:
                                                 if (index < 3) {
-                                                    mouseLeftStick.forceActiveFocus(Qt.TabFocusReason);
+                                                    mouseStickSelector.forceActiveFocus(Qt.TabFocusReason);
                                                     event.accepted = true;
                                                 } else if (!firstInFocusChain)
                                                 {

@@ -265,8 +265,8 @@ private:
     void refreshPendingFrameAge();
     void snapshotPendingFrame();
     bool handleShortcut(QKeyEvent *event);
-    void handleMouseLeftStick(QMouseEvent *event);
-    void resetMouseLeftStick();
+    void handleMouseStick(QMouseEvent *event);
+    void resetMouseStick();
 #ifdef Q_OS_WIN
     bool nativeEvent(const QByteArray &event_type, void *message, qintptr *result) override;
     void updateRawMouseInput();
