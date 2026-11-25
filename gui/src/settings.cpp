@@ -996,6 +996,16 @@ void Settings::SetMouseTouchEnabled(bool enabled)
 	settings.setValue("settings/mouse_touch_enabled", enabled);
 }
 
+bool Settings::GetMouseLeftStickEnabled() const
+{
+	return settings.value("settings/mouse_left_stick_enabled", false).toBool();
+}
+
+void Settings::SetMouseLeftStickEnabled(bool enabled)
+{
+	settings.setValue("settings/mouse_left_stick_enabled", enabled);
+}
+
 
 bool Settings::GetDpadTouchEnabled() const
 {

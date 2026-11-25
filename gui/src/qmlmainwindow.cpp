@@ -30,6 +30,8 @@ extern "C" {
 #include <QStandardPaths>
 #include <QCoreApplication>
 #include <QGuiApplication>
+#include <QCursor>
+#include <QScreen>
 #include <QFile>
 #include <QWidget>
 #include <QLabel>
@@ -2758,6 +2760,7 @@ void QmlMainWindow::grabInput()
 {
     setCursor(Qt::ArrowCursor);
     grab_input++;
+    resetMouseLeftStick();
     if (session)
         session->BlockInput(grab_input);
 }
@@ -5162,6 +5165,7 @@ renderer_backend_ready:
         const bool preserve_startup_warmup = s && startup_warmup_preserve_next_session_change;
         startup_warmup_preserve_next_session_change = false;
         session = s;
+        mouse_stick_position_valid = false;
         stream_session_active.storeRelease(s ? 1 : 0);
         startup_video_visible_generation.fetchAndAddRelaxed(1);
         grab_input = 0;
@@ -7701,25 +7705,77 @@ bool QmlMainWindow::nvidiaCard() const
     return nvidia_card;
 }
 
+void QmlMainWindow::resetMouseLeftStick()
+{
+    mouse_stick_position_valid = false;
+    if (session)
+        session->ResetMouseLeftStick();
+}
+
+void QmlMainWindow::handleMouseLeftStick(QMouseEvent *event)
+{
+    const QPointF position = event->globalPosition();
+    const QPoint cursor = position.toPoint();
+    const QRect window_bounds(mapToGlobal(QPoint()), size());
+    if (!window_bounds.contains(cursor)) {
+        resetMouseLeftStick();
+        return;
+    }
+
+    if (mouse_stick_position_valid)
+        session->HandleMouseLeftStickMovement(position - mouse_stick_position);
+    mouse_stick_position = position;
+    mouse_stick_position_valid = true;
+
+    // Keep room for further movement on platforms that let Qt reposition the pointer.
+    static const bool can_recenter = !QGuiApplication::platformName().startsWith(QStringLiteral("wayland"));
+    if (!can_recenter)
+        return;
+    const QScreen *cursor_screen = QGuiApplication::screenAt(cursor);
+    const QRect bounds = cursor_screen ? window_bounds.intersected(cursor_screen->geometry()) : window_bounds;
+    const int margin = qMin(32, qMin(bounds.width(), bounds.height()) / 4);
+    if (!bounds.adjusted(margin, margin, -margin, -margin).contains(cursor)) {
+        const QPoint center = bounds.center();
+        QCursor::setPos(center);
+        // Base the next delta on the warp target only if the platform accepted it.
+        if (QCursor::pos() == center)
+            mouse_stick_position = center;
+    }
+}
+
 bool QmlMainWindow::event(QEvent *event)
 {
     switch (event->type()) {
+    case QEvent::FocusOut:
+    case QEvent::Leave:
+    case QEvent::Hide:
+        resetMouseLeftStick();
+        break;
     case QEvent::MouseMove:
     case QEvent::MouseButtonPress:
-    case QEvent::MouseButtonRelease:
-        if (static_cast<QMouseEvent*>(event)->source() != Qt::MouseEventNotSynthesized)
+    case QEvent::MouseButtonRelease: {
+        auto *mouse_event = static_cast<QMouseEvent *>(event);
+        if (mouse_event->source() != Qt::MouseEventNotSynthesized)
             return true;
         if (session && !grab_input) {
-            if (event->type() == QEvent::MouseMove)
-                session->HandleMouseMoveEvent(static_cast<QMouseEvent*>(event), width(), height());
-            else if (event->type() == QEvent::MouseButtonPress)
-                session->HandleMousePressEvent(static_cast<QMouseEvent*>(event));
-            else if (event->type() == QEvent::MouseButtonRelease)
-                session->HandleMouseReleaseEvent(static_cast<QMouseEvent*>(event));
+            const bool use_mouse_stick = has_video && isActive() && session->UsesMouseLeftStick(mouse_event->buttons());
+            if (!use_mouse_stick && mouse_stick_position_valid)
+                resetMouseLeftStick();
+            if (event->type() == QEvent::MouseMove) {
+                if (use_mouse_stick)
+                    handleMouseLeftStick(mouse_event);
+                else
+                    session->HandleMouseMoveEvent(mouse_event, width(), height());
+            } else if (event->type() == QEvent::MouseButtonPress) {
+                session->HandleMousePressEvent(mouse_event);
+            } else {
+                session->HandleMouseReleaseEvent(mouse_event);
+            }
             return true;
         }
         QGuiApplication::sendEvent(quick_window, event);
         break;
+    }
     case QEvent::MouseButtonDblClick:
         if(!settings->GetFullscreenDoubleClickEnabled())
             break;

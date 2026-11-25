@@ -95,6 +95,7 @@ class SdeckHapticsWorker;
 		bool enable_keyboard;
 		bool keyboard_controller_enabled;
 		bool mouse_touch_enabled;
+		bool mouse_left_stick_enabled;
 		bool enable_dualsense;
 		bool auto_regist;
 		float haptic_override;
@@ -220,6 +221,11 @@ class StreamSession : public QObject
 		bool rumble_haptics_on;
 		float PS_TOUCHPAD_MAX_X, PS_TOUCHPAD_MAX_Y;
 		ChiakiControllerState keyboard_state;
+		QTimer *mouse_stick_timer;
+		QElapsedTimer mouse_stick_activity;
+		QPointF mouse_stick_delta;
+		QPoint mouse_stick_axes;
+		bool mouse_stick_sample_pending = false;
 		ChiakiControllerState touch_state;
 		QMap<int, uint8_t> touch_tracker;
 		int8_t mouse_touch_id;
@@ -229,6 +235,7 @@ class StreamSession : public QObject
 		float haptic_override;
 		bool keyboard_controller_enabled;
 		bool mouse_touch_enabled;
+		bool mouse_left_stick_enabled;
 		bool dpad_regular;
 		bool dpad_regular_touch_switched;
 		uint dpad_touch_shortcut1;
@@ -371,6 +378,9 @@ class StreamSession : public QObject
 		void HandleMouseReleaseEvent(QMouseEvent *event);
 		void HandleMousePressEvent(QMouseEvent *event);
 		void HandleMouseMoveEvent(QMouseEvent *event, qreal width, qreal height);
+		bool UsesMouseLeftStick(Qt::MouseButtons buttons) const;
+		void HandleMouseLeftStickMovement(const QPointF &delta);
+		void ResetMouseLeftStick();
 #if CHIAKI_GUI_ENABLE_SPEEX
 		bool ProcessMicFrame(int16_t *echo_buf);
 #endif
@@ -404,6 +414,8 @@ class StreamSession : public QObject
 		void UpdateGamepads();
 		void DpadSendFeedbackState();
 		void SendFeedbackState();
+		void UpdateMouseLeftStick();
+		ChiakiControllerState GetKeyboardMouseState() const;
 };
 
 Q_DECLARE_METATYPE(ChiakiQuitReason)

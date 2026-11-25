@@ -1,5 +1,11 @@
 # Controller Configuration
 
+## Using the Mouse as the Left Stick
+
+In the desktop app, open **Settings → Keys** and enable **Mouse as left stick (L3)** before starting a stream. Move the mouse inside the stream window to tilt the left stick. Faster movement tilts it further, and the stick centers when the mouse stops. A keyboard binding for the left stick takes priority while held. The L3 button press still uses its own key binding.
+
+With **Enable Mouse Touchpad** turned on, dragging with the left mouse button controls the touchpad. On native Wayland the pointer stays where you move it, so reverse direction to bring it away from a screen edge.
+
 ## Configuring Steam Deck Controller Profile
 
 !!! Tip

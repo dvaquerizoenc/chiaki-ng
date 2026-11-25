@@ -2235,24 +2235,8 @@ DialogView {
                             Keys.onPressed: (event) => {
                                 switch (event.key) {
                                 case Qt.Key_Down:
-                                    if (!lastInFocusChain) {
-                                        let item = nextItemInFocusChain();
-                                        if (item) {
-                                            item.forceActiveFocus(Qt.TabFocusReason);
-                                            keysFlick.ensureItemVisible(item);
-                                        }
-                                        for(var i = 0; i < 3; i++)
-                                        {
-                                            let item2 = item.nextItemInFocusChain();
-                                            if (item)
-                                            {
-                                                item.forceActiveFocus(Qt.TabFocusReason);
-                                                keysFlick.ensureItemVisible(item);
-                                                item = item2;
-                                            }
-                                        }
-                                        event.accepted = true;
-                                    }
+                                    mouseLeftStick.forceActiveFocus(Qt.TabFocusReason);
+                                    event.accepted = true;
                                     break;
                                 case Qt.Key_Right:
                                     if (!lastInFocusChain) {
@@ -2317,24 +2301,8 @@ DialogView {
                                         }
                                         break;
                                     case Qt.Key_Down:
-                                        if (!lastInFocusChain) {
-                                            let item = nextItemInFocusChain();
-                                            if (item) {
-                                                item.forceActiveFocus(Qt.TabFocusReason);
-                                                keysFlick.ensureItemVisible(item);
-                                            }
-                                            for(var i = 0; i < 3; i++)
-                                            {
-                                                let item2 = item.nextItemInFocusChain();
-                                                if (item)
-                                                {
-                                                    item.forceActiveFocus(Qt.TabFocusReason);
-                                                    keysFlick.ensureItemVisible(item);
-                                                    item = item2;
-                                                }
-                                            }
-                                            event.accepted = true;
-                                        }
+                                        mouseLeftStick.forceActiveFocus(Qt.TabFocusReason);
+                                        event.accepted = true;
                                         break;
                                     case Qt.Key_Return:
                                         if (visualFocus) {
@@ -2347,6 +2315,7 @@ DialogView {
                             }
                         }
                         CheckBox {
+                            id: mouseTouchpad
                             text: qsTr("Enable Mouse Touchpad")
                             checked: {
                                 Chiaki.settings.mouseTouchEnabled
@@ -2379,24 +2348,8 @@ DialogView {
                                         }
                                         break;
                                     case Qt.Key_Down:
-                                        if (!lastInFocusChain) {
-                                            let item = nextItemInFocusChain();
-                                            if (item) {
-                                                item.forceActiveFocus(Qt.TabFocusReason);
-                                                keysFlick.ensureItemVisible(item);
-                                            }
-                                            for(var i = 0; i < 3; i++)
-                                            {
-                                                let item2 = item.nextItemInFocusChain();
-                                                if (item)
-                                                {
-                                                    item.forceActiveFocus(Qt.TabFocusReason);
-                                                    keysFlick.ensureItemVisible(item);
-                                                    item = item2;
-                                                }
-                                            }
-                                            event.accepted = true;
-                                        }
+                                        mouseLeftStick.forceActiveFocus(Qt.TabFocusReason);
+                                        event.accepted = true;
                                         break;
                                     case Qt.Key_Return:
                                         if (visualFocus) {
@@ -2405,6 +2358,29 @@ DialogView {
                                         }
                                         event.accepted = true;
                                         break;
+                                }
+                            }
+                        }
+                        CheckBox {
+                            id: mouseLeftStick
+                            text: qsTr("Mouse as left stick (L3)")
+                            checked: Chiaki.settings.mouseLeftStickEnabled
+                            onToggled: Chiaki.settings.mouseLeftStickEnabled = checked
+                            Layout.columnSpan: 3
+                            Layout.alignment: Qt.AlignRight
+                            Material.roundedScale: Material.SmallScale
+                            Material.background: visualFocus ? Material.accent : undefined
+                            onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                            KeyNavigation.up: mouseTouchpad
+                            Keys.onDownPressed: {
+                                const item = nextItemInFocusChain();
+                                if (item)
+                                    item.forceActiveFocus(Qt.TabFocusReason);
+                            }
+                            Keys.onReturnPressed: {
+                                if (visualFocus) {
+                                    toggle();
+                                    toggled();
                                 }
                             }
                         }
@@ -2467,7 +2443,10 @@ DialogView {
                                                 }
                                                 break;
                                             case Qt.Key_Up:
-                                                if (!firstInFocusChain)
+                                                if (index < 3) {
+                                                    mouseLeftStick.forceActiveFocus(Qt.TabFocusReason);
+                                                    event.accepted = true;
+                                                } else if (!firstInFocusChain)
                                                 {
                                                     let item = nextItemInFocusChain(false);
                                                     if (item) {

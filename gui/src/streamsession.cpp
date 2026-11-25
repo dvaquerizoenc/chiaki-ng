@@ -17,6 +17,7 @@
 #include <atomic>
 
 #include <algorithm>
+#include <cmath>
 
 #include <cstring>
 
@@ -26,6 +27,8 @@
 #define STEAMDECK_HAPTIC_CONNECT_DELAY_MS 1100
 #define NEW_DPAD_TOUCH_INTERVAL_MS 500
 #define DPAD_TOUCH_UPDATE_INTERVAL_MS 10
+#define MOUSE_STICK_UPDATE_INTERVAL_MS 16
+#define MOUSE_STICK_IDLE_INTERVAL_MS 48
 #define STEAMDECK_HAPTIC_PACKETS_PER_ANALYSIS 4 // send packets every interval * packets per analysis
 #define RUMBLE_HAPTICS_PACKETS_PER_RUMBLE 3
 #define STEAMDECK_HAPTIC_SAMPLING_RATE 3000
@@ -303,6 +306,7 @@ StreamSessionConnectInfo::StreamSessionConnectInfo(
 	const bool keyboard_controller_enabled_setting = settings->GetKeyboardEnabled();
 	this->keyboard_controller_enabled = keyboard_controller_enabled_setting;
 	this->mouse_touch_enabled = settings->GetMouseTouchEnabled();
+	this->mouse_left_stick_enabled = settings->GetMouseLeftStickEnabled();
 	this->enable_keyboard = false;
 	this->enable_dualsense = true;
 	this->enable_idr_on_fec_failure = settings->GetIDROnFECFailureEnabled();
@@ -462,6 +466,7 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 #endif
 	audio_buffer_size = connect_info.audio_buffer_size;
 	mouse_touch_enabled = connect_info.mouse_touch_enabled;
+	mouse_left_stick_enabled = connect_info.mouse_left_stick_enabled;
 	keyboard_controller_enabled = connect_info.keyboard_controller_enabled;
 	host = connect_info.host;
 	QByteArray host_str = connect_info.host.toUtf8();
@@ -513,6 +518,10 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	}
 
 	chiaki_controller_state_set_idle(&keyboard_state);
+	mouse_stick_timer = new QTimer(this);
+	mouse_stick_timer->setTimerType(Qt::PreciseTimer);
+	mouse_stick_timer->setInterval(MOUSE_STICK_UPDATE_INTERVAL_MS);
+	connect(mouse_stick_timer, &QTimer::timeout, this, &StreamSession::UpdateMouseLeftStick);
 	chiaki_controller_state_set_idle(&touch_state);
 	touch_tracker=QMap<int, uint8_t>();
 	mouse_touch_id=-1;
@@ -945,6 +954,66 @@ void StreamSession::HandleMouseMoveEvent(QMouseEvent *event, qreal width, qreal 
 	SendFeedbackState();
 }
 
+bool StreamSession::UsesMouseLeftStick(Qt::MouseButtons buttons) const
+{
+	return mouse_left_stick_enabled && !(mouse_touch_enabled && buttons == Qt::LeftButton);
+}
+
+void StreamSession::HandleMouseLeftStickMovement(const QPointF &delta)
+{
+	if(delta.isNull())
+		return;
+	mouse_stick_delta += delta;
+	mouse_stick_sample_pending = true;
+	mouse_stick_activity.start();
+	if(!mouse_stick_timer->isActive())
+		mouse_stick_timer->start();
+}
+
+void StreamSession::UpdateMouseLeftStick()
+{
+	if(mouse_stick_activity.hasExpired(MOUSE_STICK_IDLE_INTERVAL_MS))
+	{
+		ResetMouseLeftStick();
+		return;
+	}
+	if(!mouse_stick_sample_pending)
+		return;
+
+	// Accumulate movement over the timer interval and limit the diagonal to the stick radius.
+	constexpr qreal full_tilt_pixels = 24.0;
+	const qreal distance = std::hypot(mouse_stick_delta.x(), mouse_stick_delta.y());
+	const QPoint axes = (mouse_stick_delta * (0x7fff / std::max(full_tilt_pixels, distance))).toPoint();
+	mouse_stick_delta = QPointF();
+	mouse_stick_sample_pending = false;
+	if(axes == mouse_stick_axes)
+		return;
+	mouse_stick_axes = axes;
+	SendFeedbackState();
+}
+
+void StreamSession::ResetMouseLeftStick()
+{
+	mouse_stick_timer->stop();
+	mouse_stick_delta = QPointF();
+	mouse_stick_sample_pending = false;
+	if(mouse_stick_axes.isNull())
+		return;
+	mouse_stick_axes = QPoint();
+	SendFeedbackState();
+}
+
+ChiakiControllerState StreamSession::GetKeyboardMouseState() const
+{
+	auto state = keyboard_state;
+	if(!state.left_x && !state.left_y)
+	{
+		state.left_x = mouse_stick_axes.x();
+		state.left_y = mouse_stick_axes.y();
+	}
+	return state;
+}
+
 void StreamSession::HandleKeyboardEvent(QKeyEvent *event)
 {
 	if(!keyboard_controller_enabled)
@@ -1283,7 +1352,8 @@ void StreamSession::DpadSendFeedbackState()
 #if CHIAKI_GUI_ENABLE_STEAMDECK_NATIVE
 	chiaki_controller_state_or(&state, &state, &sdeck_state);
 #endif
-	chiaki_controller_state_or(&state, &state, &keyboard_state);
+	const auto keyboard_mouse_state = GetKeyboardMouseState();
+	chiaki_controller_state_or(&state, &state, &keyboard_mouse_state);
 	chiaki_controller_state_or(&state, &state, &touch_state);
 
 	if(input_block)
@@ -1339,7 +1409,8 @@ void StreamSession::SendFeedbackState()
 #if CHIAKI_GUI_ENABLE_STEAMDECK_NATIVE
 	chiaki_controller_state_or(&state, &state, &sdeck_state);
 #endif
-	chiaki_controller_state_or(&state, &state, &keyboard_state);
+	const auto keyboard_mouse_state = GetKeyboardMouseState();
+	chiaki_controller_state_or(&state, &state, &keyboard_mouse_state);
 	chiaki_controller_state_or(&state, &state, &touch_state);
 
 	if(input_block)

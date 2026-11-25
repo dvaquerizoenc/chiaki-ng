@@ -265,6 +265,8 @@ private:
     void refreshPendingFrameAge();
     void snapshotPendingFrame();
     bool handleShortcut(QKeyEvent *event);
+    void handleMouseLeftStick(QMouseEvent *event);
+    void resetMouseLeftStick();
     bool event(QEvent *event) override;
     QObject *focusObject() const override;
     void updateQueueDepthAverage(int depth);
@@ -314,6 +316,8 @@ private:
     bool keep_video = false;
     RenderBackend render_backend = RenderBackend::Vulkan;
     int grab_input = 0;
+    QPointF mouse_stick_position;
+    bool mouse_stick_position_valid = false;
     int dropped_frames = 0;
     bool is_window_adjustable = false;
     bool is_stream_window_adjustable = false;
