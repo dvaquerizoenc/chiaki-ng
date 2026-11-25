@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 #include "../gui/include/mousestick.h"
+#include "../gui/include/mouselock.h"
 #include <munit.h>
 
 static MunitResult test_independent_sticks(const MunitParameter[], void *)
@@ -143,6 +144,56 @@ static MunitResult test_calibration(const MunitParameter[], void *)
     return MUNIT_OK;
 }
 
+static MunitResult test_mouse_lock_lifecycle(const MunitParameter[], void *)
+{
+    MouseLockState lock;
+    lock.beginSession(true);
+    munit_assert_true(lock.wantsClip(true, true, true));
+    munit_assert_false(lock.wantsClip(true, false, true));
+    munit_assert_false(lock.wantsClip(false, true, true));
+    munit_assert_false(lock.wantsClip(true, true, false));
+
+    munit_assert_false(lock.shortcut(7, 8, true, false, true));
+    munit_assert_false(lock.shortcut(8, 8, true, false, false));
+    munit_assert_true(lock.shortcut(8, 8, true, false, true));
+    munit_assert_false(lock.wantsClip(true, true, true));
+    munit_assert_true(lock.shortcut(8, 8, true, true, true));
+    munit_assert_false(lock.wantsClip(true, true, true));
+    // The release belongs to the hotkey even if a menu opened after the press.
+    munit_assert_true(lock.shortcut(8, 8, false, false, false));
+    lock.focusLost();
+    munit_assert_false(lock.wantsClip(true, true, true));
+    munit_assert_true(lock.shortcut(8, 8, true, false, true));
+    lock.focusLost();
+    munit_assert_true(lock.wantsClip(true, true, true));
+
+    lock.beginSession(false);
+    munit_assert_false(lock.wantsClip(true, true, true));
+    munit_assert_true(lock.shortcut(9, 9, true, false, true));
+    munit_assert_true(lock.wantsClip(true, true, true));
+    return MUNIT_OK;
+}
+
+static MunitResult test_mouse_lock_geometry_and_motion(const MunitParameter[], void *)
+{
+    const MouseLockRect client{-1000, -240, 100, 620};
+    const MouseLockRect leftMonitor{-1920, -1080, 0, 0};
+    const auto clip = client.intersected(leftMonitor);
+    munit_assert_true(clip.valid());
+    munit_assert_long(clip.left, ==, -1000);
+    munit_assert_long(clip.top, ==, -240);
+    munit_assert_long(clip.right, ==, 0);
+    munit_assert_long(clip.bottom, ==, 0);
+    munit_assert_false(client.intersected({100, 0, 1200, 1080}).valid());
+
+    munit_assert_true(acceptRelativeMouseMotion(true, true, true, false));
+    munit_assert_false(acceptRelativeMouseMotion(true, true, false, false));
+    munit_assert_true(acceptRelativeMouseMotion(true, true, false, true));
+    munit_assert_false(acceptRelativeMouseMotion(false, true, true, true));
+    munit_assert_false(acceptRelativeMouseMotion(true, false, true, true));
+    return MUNIT_OK;
+}
+
 extern "C" {
 MunitTest tests_mouse_stick[] = {
     { const_cast<char *>("/independent_sticks"), test_independent_sticks, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
@@ -151,6 +202,8 @@ MunitTest tests_mouse_stick[] = {
     { const_cast<char *>("/neutral"), test_neutral_and_precise_restart, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
     { const_cast<char *>("/saturation"), test_saturation_and_flick, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
     { const_cast<char *>("/calibration"), test_calibration, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
+    { const_cast<char *>("/lock_lifecycle"), test_mouse_lock_lifecycle, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
+    { const_cast<char *>("/lock_geometry_and_motion"), test_mouse_lock_geometry_and_motion, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
     { nullptr, nullptr, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr }
 };
 }

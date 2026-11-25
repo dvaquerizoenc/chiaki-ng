@@ -1003,6 +1003,8 @@ MouseStickOptions Settings::GetMouseStickOptions() const
 	options.mode = static_cast<MouseStickMode>(qBound(0, settings.value("settings/mouse_stick_mode", legacyLeft ? 1 : 0).toInt(), 2));
 	options.immediate = settings.value("settings/mouse_immediate", true).toBool();
 	options.rawInput = settings.value("settings/mouse_raw_input", true).toBool();
+	options.lockDuringGameplay = settings.value("settings/mouse_lock_during_gameplay", true).toBool();
+	options.lockShortcut = qBound(0, settings.value("settings/mouse_lock_shortcut", 8).toInt(), 12);
 	options.wasd = settings.value("settings/mouse_wasd", true).toBool();
 	options.horizontal = qBound(1, settings.value("settings/mouse_sensitivity_x", 100).toInt(), int(MouseSensitivityMax));
 	options.vertical = qBound(1, settings.value("settings/mouse_sensitivity_y", 100).toInt(), int(MouseSensitivityMax));
@@ -1025,6 +1027,8 @@ void Settings::SetMouseStickOptions(const MouseStickOptions &options)
 	settings.setValue("settings/mouse_stick_mode", static_cast<int>(options.mode));
 	settings.setValue("settings/mouse_immediate", options.immediate);
 	settings.setValue("settings/mouse_raw_input", options.rawInput);
+	settings.setValue("settings/mouse_lock_during_gameplay", options.lockDuringGameplay);
+	settings.setValue("settings/mouse_lock_shortcut", options.lockShortcut);
 	settings.setValue("settings/mouse_wasd", options.wasd);
 	settings.setValue("settings/mouse_sensitivity_x", options.horizontal);
 	settings.setValue("settings/mouse_sensitivity_y", options.vertical);

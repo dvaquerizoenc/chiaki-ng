@@ -388,6 +388,9 @@ class StreamSession : public QObject
 		bool HasMouseButtonMapping(Qt::MouseButton button) const;
 		bool UsesWasdControls() const { return keyboard_controller_enabled && mouse_options.mode == MouseStickMode::Right && mouse_options.wasd; }
 		bool UsesRawMouseInput() const { return mouse_options.rawInput; }
+		bool UsesRightMouseStick() const { return mouse_options.mode == MouseStickMode::Right; }
+		bool AutoLocksMouse() const { return mouse_options.lockDuringGameplay; }
+		int MouseLockShortcut() const { return mouse_options.lockShortcut; }
 		void HandleMouseStickMovement(const QPointF &delta);
 		MouseStickSaturation TakeMouseSaturation();
 		void ResetMouseStick();

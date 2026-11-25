@@ -2875,12 +2875,18 @@ void QmlMainWindow::setControllerKeyCaptureActive(bool active)
     if (active && !controller_key_capture.isActive() && session && !grab_input)
         session->ResetMouseInput(true);
     controller_key_capture.setActive(active);
+#ifdef Q_OS_WIN
+    updateMouseLock();
+#endif
 }
 
 void QmlMainWindow::grabInput()
 {
     setCursor(Qt::ArrowCursor);
     grab_input++;
+#ifdef Q_OS_WIN
+    releaseMouseLock();
+#endif
     mouse_stick_position_valid = false;
     if (session) {
         session->ResetMouseInput(true);
@@ -2897,6 +2903,9 @@ void QmlMainWindow::releaseInput()
         setCursor(Qt::BlankCursor);
     if (session)
         session->BlockInput(grab_input);
+#ifdef Q_OS_WIN
+    updateMouseLock();
+#endif
 }
 
 void QmlMainWindow::requestOverlayUpdate()
@@ -5285,12 +5294,19 @@ renderer_backend_ready:
 
     backend = new QmlBackend(settings, this);
     stats_overlay_widget = new StatsOverlayWidget(this, backend);
+#ifdef Q_OS_WIN
+    connect(this, &QmlMainWindow::hasVideoChanged, this, &QmlMainWindow::updateMouseLock);
+    connect(this, &QWindow::screenChanged, this, &QmlMainWindow::updateMouseLock);
+    connect(this, &QWindow::activeChanged, this, &QmlMainWindow::updateMouseLock);
+#endif
     connect(backend, &QmlBackend::sessionChanged, this, [this, exit_app_on_stream_exit](StreamSession *s) {
         const bool preserve_startup_warmup = s && startup_warmup_preserve_next_session_change;
         startup_warmup_preserve_next_session_change = false;
         session = s;
         mouse_stick_position_valid = false;
 #ifdef Q_OS_WIN
+        releaseMouseLock();
+        mouse_lock.beginSession(s && s->AutoLocksMouse());
         updateRawMouseInput();
 #endif
         stream_session_active.storeRelease(s ? 1 : 0);
@@ -7849,10 +7865,13 @@ void QmlMainWindow::resetMouseStick()
 void QmlMainWindow::updateRawMouseInput()
 {
     setRawMouseInput(session && session->UsesRawMouseInput() && session->UsesMouseStick(Qt::NoButton));
+    updateMouseLock();
 }
 
 void QmlMainWindow::setRawMouseInput(bool enabled)
 {
+    if (!enabled)
+        releaseMouseLock();
     if (enabled == raw_mouse_registered)
         return;
     // Leave legacy button and touchpad input enabled. Receive movement only in the foreground.
@@ -7866,10 +7885,83 @@ void QmlMainWindow::setRawMouseInput(bool enabled)
     }
 }
 
+bool QmlMainWindow::canLockMouse() const
+{
+    return session && has_video && !grab_input && !controller_key_capture.isActive() &&
+           session->UsesRightMouseStick() && raw_mouse_registered;
+}
+
+void QmlMainWindow::releaseMouseLock()
+{
+    if (!mouse_clip_active)
+        return;
+    RECT current{};
+    // The cursor is a desktop resource. Leave a clip installed by a different window alone.
+    if ((!GetClipCursor(&current) || EqualRect(&current, &mouse_clip_rect)) && !ClipCursor(nullptr)) {
+        qCWarning(chiakiGui) << "Could not release the mouse cursor" << GetLastError();
+        return;
+    }
+    mouse_clip_active = false;
+    mouse_stick_position_valid = false;
+}
+
+void QmlMainWindow::updateMouseLock()
+{
+    HWND hwnd = handle() ? reinterpret_cast<HWND>(winId()) : nullptr;
+    const bool foreground = hwnd && isActive() && GetForegroundWindow() == hwnd &&
+                            !IsIconic(hwnd) && IsWindowVisible(hwnd);
+    if (!mouse_lock.wantsClip(canLockMouse(), foreground, !raw_mouse_uses_legacy)) {
+        releaseMouseLock();
+        return;
+    }
+
+    RECT client{};
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!GetClientRect(hwnd, &client) ||
+        !GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL), &monitor)) {
+        releaseMouseLock();
+        return;
+    }
+    POINT topLeft{client.left, client.top};
+    POINT bottomRight{client.right, client.bottom};
+    if (!ClientToScreen(hwnd, &topLeft) || !ClientToScreen(hwnd, &bottomRight)) {
+        releaseMouseLock();
+        return;
+    }
+    const auto &screen = monitor.rcMonitor;
+    const auto bounds = MouseLockRect{topLeft.x, topLeft.y, bottomRight.x, bottomRight.y}
+        .intersected({screen.left, screen.top, screen.right, screen.bottom});
+    if (!bounds.valid()) {
+        releaseMouseLock();
+        return;
+    }
+    const RECT clip{bounds.left, bounds.top, bounds.right, bounds.bottom};
+    RECT current{};
+    if (mouse_clip_active && EqualRect(&clip, &mouse_clip_rect) &&
+        GetClipCursor(&current) && EqualRect(&current, &clip))
+        return;
+    if (!ClipCursor(&clip)) {
+        qCWarning(chiakiGui) << "Could not confine the mouse cursor" << GetLastError();
+        releaseMouseLock();
+        return;
+    }
+    mouse_clip_rect = clip;
+    mouse_clip_active = true;
+    mouse_stick_position_valid = false;
+}
+
 bool QmlMainWindow::nativeEvent(const QByteArray &event_type, void *message, qintptr *result)
 {
     const auto *msg = static_cast<const MSG *>(message);
-    if (event_type != "windows_generic_MSG" || !raw_mouse_registered || msg->message != WM_INPUT)
+    if (event_type != "windows_generic_MSG")
+        return QWindow::nativeEvent(event_type, message, result);
+    if (msg->message == WM_KILLFOCUS || (msg->message == WM_ACTIVATE && LOWORD(msg->wParam) == WA_INACTIVE) ||
+        (msg->message == WM_ACTIVATEAPP && !msg->wParam) || (msg->message == WM_SIZE && msg->wParam == SIZE_MINIMIZED))
+        releaseMouseLock();
+    if (msg->message == WM_DPICHANGED || msg->message == WM_DISPLAYCHANGE)
+        QMetaObject::invokeMethod(this, &QmlMainWindow::updateMouseLock, Qt::QueuedConnection);
+    if (!raw_mouse_registered || msg->message != WM_INPUT)
         return QWindow::nativeEvent(event_type, message, result);
 
     const auto begin_us = chiaki_latency_begin();
@@ -7879,11 +7971,18 @@ bool QmlMainWindow::nativeEvent(const QByteArray &event_type, void *message, qin
                                       &size, sizeof(RAWINPUTHEADER));
     if (read == UINT(-1)) {
         raw_mouse_uses_legacy = true;
+        releaseMouseLock();
     } else if (input.header.dwType == RIM_TYPEMOUSE) {
-        raw_mouse_uses_legacy = (input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0;
-        if (!raw_mouse_uses_legacy && session && has_video && !grab_input && isActive() &&
-            (input.data.mouse.lLastX || input.data.mouse.lLastY) &&
-            QRect(mapToGlobal(QPoint()), this->size()).contains(QCursor::pos())) {
+        const bool legacy = (input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0;
+        if (legacy != raw_mouse_uses_legacy) {
+            raw_mouse_uses_legacy = legacy;
+            updateMouseLock();
+        }
+        const bool gameplay = session && has_video && !grab_input && !controller_key_capture.isActive() && isActive();
+        if ((input.data.mouse.lLastX || input.data.mouse.lLastY) &&
+            acceptRelativeMouseMotion(!legacy, gameplay, mouse_clip_active,
+                                      !legacy && gameplay && !mouse_clip_active &&
+                                      QRect(mapToGlobal(QPoint()), this->size()).contains(QCursor::pos()))) {
             const bool touchpadDrag = !session->UsesMouseStick(Qt::LeftButton) && GetKeyState(VK_LBUTTON) < 0 &&
                 GetKeyState(VK_RBUTTON) >= 0 && GetKeyState(VK_MBUTTON) >= 0 &&
                 GetKeyState(VK_XBUTTON1) >= 0 && GetKeyState(VK_XBUTTON2) >= 0;
@@ -7902,6 +8001,12 @@ bool QmlMainWindow::nativeEvent(const QByteArray &event_type, void *message, qin
 
 void QmlMainWindow::handleMouseStick(QMouseEvent *event)
 {
+#ifdef Q_OS_WIN
+    // Relative Raw Input works at the clip edge without any cursor warp. Ignore
+    // legacy moves as well as any move Windows generates when applying the clip.
+    if (raw_mouse_registered && !raw_mouse_uses_legacy && session->UsesRightMouseStick())
+        return;
+#endif
     const QPointF position = event->globalPosition();
     const QPoint cursor = position.toPoint();
     const QRect window_bounds(mapToGlobal(QPoint()), size());
@@ -7950,11 +8055,19 @@ bool QmlMainWindow::event(QEvent *event)
     case QEvent::FocusOut:
     case QEvent::WindowDeactivate:
     case QEvent::Hide:
+#ifdef Q_OS_WIN
+        releaseMouseLock();
+        mouse_lock.focusLost();
+#endif
         mouse_stick_position_valid = false;
         if (session)
             session->ResetMouseInput(true);
         break;
     case QEvent::Leave:
+#ifdef Q_OS_WIN
+        if (mouse_clip_active)
+            break;
+#endif
         resetMouseStick();
         break;
     case QEvent::MouseMove:
@@ -8030,6 +8143,22 @@ bool QmlMainWindow::event(QEvent *event)
             }
             break;
         }
+#ifdef Q_OS_WIN
+        if (event->spontaneous()) {
+            const int functionKey = session ? session->MouseLockShortcut() : 0;
+            const int binding = functionKey ? Qt::Key_F1 + functionKey - 1 : 0;
+            const bool pressed = event->type() == QEvent::KeyPress;
+            if (mouse_lock.shortcut(key->key(), binding, pressed, key->isAutoRepeat(),
+                                    canLockMouse() && isActive() && key->modifiers() == Qt::NoModifier)) {
+                if (pressed && !key->isAutoRepeat()) {
+                    updateMouseLock();
+                    resetMouseStick();
+                }
+                event->accept();
+                return true;
+            }
+        }
+#endif
         if (event->type() == QEvent::KeyPress && handleShortcut(key))
             return true;
         if (target == ControllerKeyTarget::Gameplay) {
@@ -8050,10 +8179,16 @@ bool QmlMainWindow::event(QEvent *event)
         QGuiApplication::sendEvent(quick_window, event);
         break;
     case QEvent::Close:
+#ifdef Q_OS_WIN
+        releaseMouseLock();
+#endif
         if (!backend->closeRequested()) {
             event->ignore();
             return true;
         }
+#ifdef Q_OS_WIN
+        mouse_lock.beginSession(false);
+#endif
         if (quick_render->thread() == QThread::currentThread())
             destroySwapchain();
         else
@@ -8065,6 +8200,12 @@ bool QmlMainWindow::event(QEvent *event)
 
     bool ret = QWindow::event(event);
 
+#ifdef Q_OS_WIN
+    if (event->type() == QEvent::Move || event->type() == QEvent::Resize ||
+        event->type() == QEvent::WindowStateChange || event->type() == QEvent::Show ||
+        event->type() == QEvent::WindowActivate)
+        updateMouseLock();
+#endif
     switch (event->type()) {
     case QEvent::Expose:
         if (isExposed())

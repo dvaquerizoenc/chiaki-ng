@@ -2409,6 +2409,25 @@ DialogView {
                                         onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
                                     }
                                 }
+                                RowLayout {
+                                    visible: Qt.platform.os === "windows"
+                                    enabled: mouseControls.options.mode === 2 && mouseControls.options.rawInput
+                                    CheckBox {
+                                        text: qsTr("Lock mouse during gameplay")
+                                        checked: mouseControls.options.lockDuringGameplay
+                                        onToggled: Chiaki.settings.setMouseStickOption("lockDuringGameplay", checked ? 1 : 0)
+                                        onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                    }
+                                    Label { text: qsTr("Mouse lock shortcut") }
+                                    C.ComboBox {
+                                        model: [qsTr("Disabled"), "F1", "F2", "F3", "F4", "F5", "F6",
+                                                "F7", "F8", "F9", "F10", "F11", "F12"]
+                                        currentIndex: mouseControls.options.lockShortcut
+                                        Accessible.name: qsTr("Mouse lock shortcut")
+                                        onActivated: (index) => Chiaki.settings.setMouseStickOption("lockShortcut", index)
+                                        onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                    }
+                                }
                                 GridLayout {
                                     columns: 3
                                     enabled: mouseControls.options.mode !== 0

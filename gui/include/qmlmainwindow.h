@@ -3,6 +3,7 @@
 #include "streamsession.h"
 #include "settings.h"
 #include "controllerkeys.h"
+#include "mouselock.h"
 
 #include <QMutex>
 #include <QAtomicInteger>
@@ -275,6 +276,12 @@ private:
     bool nativeEvent(const QByteArray &event_type, void *message, qintptr *result) override;
     void updateRawMouseInput();
     void setRawMouseInput(bool enabled);
+    void updateMouseLock();
+    void releaseMouseLock();
+    bool canLockMouse() const;
+    MouseLockState mouse_lock;
+    RECT mouse_clip_rect{};
+    bool mouse_clip_active = false;
     bool raw_mouse_registered = false;
     bool raw_mouse_uses_legacy = false;
 #endif

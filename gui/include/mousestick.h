@@ -23,6 +23,8 @@ struct MouseStickOptions
     MouseStickMode mode = MouseStickMode::Off;
     bool immediate = true;
     bool rawInput = true;
+    bool lockDuringGameplay = true;
+    int lockShortcut = 8;
     bool wasd = true;
     int horizontal = 100;
     int vertical = 100;

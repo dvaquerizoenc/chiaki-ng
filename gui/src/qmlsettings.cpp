@@ -818,6 +818,8 @@ QVariantMap QmlSettings::mouseStickOptions() const
     return {{QStringLiteral("mode"), int(options.mode)},
             {QStringLiteral("immediate"), options.immediate},
             {QStringLiteral("rawInput"), options.rawInput},
+            {QStringLiteral("lockDuringGameplay"), options.lockDuringGameplay},
+            {QStringLiteral("lockShortcut"), options.lockShortcut},
             {QStringLiteral("wasd"), options.wasd},
             {QStringLiteral("horizontal"), options.horizontal},
             {QStringLiteral("vertical"), options.vertical},
@@ -853,6 +855,10 @@ void QmlSettings::setMouseStickOption(const QString &name, int value)
         options.immediate = value != 0;
     else if (name == QStringLiteral("rawInput"))
         options.rawInput = value != 0;
+    else if (name == QStringLiteral("lockDuringGameplay"))
+        options.lockDuringGameplay = value != 0;
+    else if (name == QStringLiteral("lockShortcut"))
+        options.lockShortcut = qBound(0, value, 12);
     else if (name == QStringLiteral("wasd"))
         options.wasd = value != 0;
     else if (name == QStringLiteral("horizontal"))
