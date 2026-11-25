@@ -1417,7 +1417,7 @@ void StreamSession::DpadSendFeedbackState()
 #if CHIAKI_GUI_ENABLE_STEAMDECK_NATIVE
 	chiaki_controller_state_or(&state, &state, &sdeck_state);
 #endif
-	const auto keyboard_mouse_state = GetKeyboardMouseState();
+	auto keyboard_mouse_state = GetKeyboardMouseState();
 	chiaki_controller_state_or(&state, &state, &keyboard_mouse_state);
 	chiaki_controller_state_or(&state, &state, &touch_state);
 
@@ -1474,7 +1474,7 @@ void StreamSession::SendFeedbackState()
 #if CHIAKI_GUI_ENABLE_STEAMDECK_NATIVE
 	chiaki_controller_state_or(&state, &state, &sdeck_state);
 #endif
-	const auto keyboard_mouse_state = GetKeyboardMouseState();
+	auto keyboard_mouse_state = GetKeyboardMouseState();
 	chiaki_controller_state_or(&state, &state, &keyboard_mouse_state);
 	chiaki_controller_state_or(&state, &state, &touch_state);
 
