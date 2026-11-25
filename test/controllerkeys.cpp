@@ -59,7 +59,7 @@ static MunitResult test_tab_capture_and_opening_key_release(const MunitParameter
 
 static MunitResult test_input_target(const MunitParameter[], void *)
 {
-    const auto interface = ControllerKeyTarget::Interface;
+    const auto ui = ControllerKeyTarget::Interface;
     const auto gameplay = ControllerKeyTarget::Gameplay;
     const auto capture = ControllerKeyTarget::Capture;
     munit_assert_int(int(controllerKeyTarget(QEvent::ShortcutOverride, true, true, false)), ==, int(capture));
@@ -68,9 +68,25 @@ static MunitResult test_input_target(const MunitParameter[], void *)
     munit_assert_int(int(controllerKeyTarget(QEvent::ShortcutOverride, false, true, false)), ==, int(gameplay));
     munit_assert_int(int(controllerKeyTarget(QEvent::KeyPress, false, true, true)), ==, int(gameplay));
     munit_assert_int(int(controllerKeyTarget(QEvent::KeyRelease, false, true, true)), ==, int(gameplay));
-    munit_assert_int(int(controllerKeyTarget(QEvent::KeyPress, false, true, false)), ==, int(interface));
-    munit_assert_int(int(controllerKeyTarget(QEvent::KeyPress, false, false, true)), ==, int(interface));
-    munit_assert_int(int(controllerKeyTarget(QEvent::ShortcutOverride, false, false, true)), ==, int(interface));
+    munit_assert_int(int(controllerKeyTarget(QEvent::KeyPress, false, true, false)), ==, int(ui));
+    munit_assert_int(int(controllerKeyTarget(QEvent::KeyPress, false, false, true)), ==, int(ui));
+    munit_assert_int(int(controllerKeyTarget(QEvent::ShortcutOverride, false, false, true)), ==, int(ui));
+    return MUNIT_OK;
+}
+
+static MunitResult test_reassign_default_navigation_keys(const MunitParameter[], void *)
+{
+    const QMap<int, Qt::Key> defaults{{CHIAKI_CONTROLLER_BUTTON_L1, Qt::Key_2},
+        {CHIAKI_CONTROLLER_BUTTON_CROSS, Qt::Key_Return},
+        {CHIAKI_CONTROLLER_BUTTON_MOON, Qt::Key_Backspace}, {CHIAKI_CONTROLLER_BUTTON_PS, Qt::Key_Escape}};
+    for (const auto oldButton : {CHIAKI_CONTROLLER_BUTTON_CROSS, CHIAKI_CONTROLLER_BUTTON_MOON, CHIAKI_CONTROLLER_BUTTON_PS}) {
+        const auto key = defaults.value(oldButton);
+        const auto changes = controllerKeyChanges(defaults, CHIAKI_CONTROLLER_BUTTON_L1, key);
+        munit_assert_int(changes.size(), ==, 2);
+        munit_assert_int(changes.value(oldButton), ==, Qt::Key_unknown);
+        munit_assert_int(changes.value(CHIAKI_CONTROLLER_BUTTON_L1), ==, key);
+        munit_assert_int(readControllerKey(writeControllerKey(changes.value(oldButton))), ==, Qt::Key_unknown);
+    }
     return MUNIT_OK;
 }
 
@@ -79,6 +95,7 @@ MunitTest tests_controller_keys[] = {
     { const_cast<char *>("/reserved_keys"), test_reserved_keys_round_trip, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
     { const_cast<char *>("/tab_capture"), test_tab_capture_and_opening_key_release, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
     { const_cast<char *>("/input_target"), test_input_target, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
+    { const_cast<char *>("/reassign_default_keys"), test_reassign_default_navigation_keys, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr },
     { nullptr, nullptr, nullptr, nullptr, MUNIT_TEST_OPTION_NONE, nullptr }
 };
 }

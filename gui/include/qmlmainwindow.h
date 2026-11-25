@@ -149,7 +149,7 @@ public:
 
     Q_INVOKABLE void grabInput();
     Q_INVOKABLE void releaseInput();
-    Q_INVOKABLE void setControllerKeyCaptureActive(bool active) { controller_key_capture.setActive(active); }
+    Q_INVOKABLE void setControllerKeyCaptureActive(bool active);
     Q_INVOKABLE void requestOverlayUpdate();
     Q_INVOKABLE void setOverlayInteractionActive(bool active);
     Q_INVOKABLE void setStatsOverlayActive(bool active);

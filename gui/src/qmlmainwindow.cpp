@@ -2860,6 +2860,13 @@ void QmlMainWindow::setKeepVideo(bool keep)
     emit keepVideoChanged();
 }
 
+void QmlMainWindow::setControllerKeyCaptureActive(bool active)
+{
+    if (active && !controller_key_capture.isActive() && session && !grab_input)
+        session->ResetMouseInput(true);
+    controller_key_capture.setActive(active);
+}
+
 void QmlMainWindow::grabInput()
 {
     setCursor(Qt::ArrowCursor);

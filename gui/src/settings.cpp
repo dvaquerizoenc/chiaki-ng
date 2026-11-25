@@ -2438,11 +2438,14 @@ QString Settings::GetChiakiControllerButtonName(int button)
 
 void Settings::SetControllerButtonMapping(int chiaki_button, Qt::Key key)
 {
-	auto button_name = GetChiakiControllerButtonName(chiaki_button).replace(' ', '_').toLower();
-	settings.setValue("keymap/" + button_name, writeControllerKey(key));
+	const auto changes = controllerKeyChanges(GetControllerMapping(false), chiaki_button, controllerKey(key));
+	for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
+		const auto button_name = GetChiakiControllerButtonName(it.key()).replace(' ', '_').toLower();
+		settings.setValue("keymap/" + button_name, writeControllerKey(it.value()));
+	}
 }
 
-QMap<int, Qt::Key> Settings::GetControllerMapping()
+QMap<int, Qt::Key> Settings::GetControllerMapping(bool includeWasd)
 {
 	// Initialize with default values
 	QMap<int, Qt::Key> result =
@@ -2485,7 +2488,7 @@ QMap<int, Qt::Key> Settings::GetControllerMapping()
 	}
 
 	const auto mouse = GetMouseStickOptions();
-	if (mouse.mode == MouseStickMode::Right && mouse.wasd) {
+	if (includeWasd && mouse.mode == MouseStickMode::Right && mouse.wasd) {
 		for (auto &key : result) {
 			if (key == Qt::Key_W || key == Qt::Key_A || key == Qt::Key_S || key == Qt::Key_D)
 				key = Qt::Key_unknown;

@@ -49,6 +49,16 @@ inline QString controllerKeyName(Qt::Key key)
     }
 }
 
+inline QMap<int, Qt::Key> controllerKeyChanges(const QMap<int, Qt::Key> &mapping, int button, Qt::Key key)
+{
+    QMap<int, Qt::Key> changes{{button, key}};
+    for (auto it = mapping.cbegin(); it != mapping.cend(); ++it) {
+        if (it.key() != button && controllerKey(it.value()) == key)
+            changes.insert(it.key(), Qt::Key_unknown);
+    }
+    return changes;
+}
+
 enum class ControllerKeyTarget { Interface, Capture, Gameplay };
 
 inline ControllerKeyTarget controllerKeyTarget(QEvent::Type type, bool capturing, bool playing, bool spontaneous)

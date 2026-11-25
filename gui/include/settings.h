@@ -737,7 +737,7 @@ class Settings : public QObject
 
 		static QString GetChiakiControllerButtonName(int);
 		void SetControllerButtonMapping(int, Qt::Key);
-		QMap<int, Qt::Key> GetControllerMapping();
+		QMap<int, Qt::Key> GetControllerMapping(bool includeWasd = true);
 		QMap<Qt::Key, int> GetControllerMappingForDecoding();
 
 	signals:
