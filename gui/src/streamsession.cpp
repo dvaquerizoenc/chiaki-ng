@@ -527,18 +527,20 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 		mouse_options.rawInput = qEnvironmentVariableIntValue("CHIAKI_MOUSE_RAW_INPUT") != 0;
 #endif
 	mouse_stick_timer->setSingleShot(true);
-	mouse_stick_timer->setInterval(int(MouseStickMotion::SampleUs / 1000));
+	mouse_stick_timer->setInterval(mouse_options.immediate ? mouse_options.velocityWindowMs :
+	                               int(MouseStickMotion::SampleUs / 1000));
 	connect(mouse_stick_timer, &QTimer::timeout, this, [this] {
 		const QPointF delta = mouse_stick_delta;
 		mouse_stick_delta = {};
 		mouse_stick_sample_pending = false;
-		if(!delta.isNull())
-			ApplyMouseStick(delta, mouse_sample_begin_us);
+		ApplyMouseStick(delta, mouse_sample_begin_us);
 	});
 	mouse_release_timer = new QTimer(this);
 	mouse_release_timer->setTimerType(Qt::PreciseTimer);
 	mouse_release_timer->setSingleShot(true);
 	connect(mouse_release_timer, &QTimer::timeout, this, [this] {
+		if(mouse_stick_sample_pending)
+			return; // The pending real movement owns the next state.
 		const auto now_us = chiaki_time_now_monotonic_us();
 		SetMouseStickAxes(mouse_motion.at(now_us));
 		ScheduleMouseRelease(now_us);
@@ -975,11 +977,12 @@ void StreamSession::HandleMouseStickMovement(const QPointF &delta)
 	if(delta.isNull())
 		return;
 	const auto begin_us = chiaki_latency_begin();
-	if(mouse_options.immediate)
+	if(mouse_options.immediate && !mouse_options.velocityWindowMs)
 	{
 		ApplyMouseStick(delta, begin_us);
 		return;
 	}
+	mouse_last_input_us = chiaki_time_now_monotonic_us();
 	if(!mouse_stick_sample_pending)
 	{
 		mouse_sample_begin_us = begin_us;
@@ -992,7 +995,9 @@ void StreamSession::HandleMouseStickMovement(const QPointF &delta)
 void StreamSession::ApplyMouseStick(const QPointF &delta, uint64_t begin_us)
 {
 	const auto now_us = chiaki_time_now_monotonic_us();
-	const auto sample = mouse_motion.move(mouse_options, delta.x(), delta.y(), now_us, aiming);
+	const auto sample = mouse_options.immediate && mouse_options.velocityWindowMs
+		? mouse_motion.moveWindow(mouse_options, delta.x(), delta.y(), now_us, mouse_last_input_us, aiming)
+		: mouse_motion.move(mouse_options, delta.x(), delta.y(), now_us, aiming);
 	mouse_saturation.record(sample.saturated);
 	if(SetMouseStickAxes(sample.axes))
 		chiaki_latency_end(CHIAKI_LATENCY_mouse_to_state, begin_us);
@@ -1031,6 +1036,7 @@ void StreamSession::ResetMouseStick()
 	mouse_stick_delta = {};
 	mouse_stick_sample_pending = false;
 	mouse_sample_begin_us = 0;
+	mouse_last_input_us = 0;
 	mouse_motion.reset();
 	SetMouseStickAxes({0, 0});
 }

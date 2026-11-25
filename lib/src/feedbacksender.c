@@ -50,6 +50,7 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_feedback_sender_init(ChiakiFeedbackSender *
 	feedback_sender->history_packet_len = 0;
 	feedback_sender->should_stop = false;
 	feedback_sender->controller_state_changed = false;
+	feedback_sender->analog_update_pending = false;
 	feedback_sender->history_dirty = false;
 	feedback_sender->history_last_size = 0;
 	feedback_sender->history_last_event_count = 0;
@@ -108,6 +109,13 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_feedback_sender_set_controller_state(Chiaki
 		return CHIAKI_ERR_SUCCESS;
 	}
 
+	const ChiakiControllerState *previous = &feedback_sender->controller_state;
+	if(previous->left_x != state->left_x || previous->left_y != state->left_y ||
+	   previous->right_x != state->right_x || previous->right_y != state->right_y)
+	{
+		chiaki_feedback_telemetry_submit(feedback_sender->analog_update_pending);
+		feedback_sender->analog_update_pending = true;
+	}
 	feedback_sender->controller_state = *state;
 	feedback_sender_record_history(feedback_sender, &feedback_sender->controller_state_history_prev, &feedback_sender->controller_state);
 	feedback_sender->controller_state_history_prev = feedback_sender->controller_state;
@@ -163,8 +171,12 @@ static void feedback_sender_send_state(ChiakiFeedbackSender *feedback_sender, co
 
 	ChiakiErrorCode err = chiaki_takion_send_feedback_state(feedback_sender->takion, feedback_sender->state_seq_num++, &feedback_state);
 	if(err == CHIAKI_ERR_SUCCESS)
+	{
 		chiaki_latency_end(CHIAKI_LATENCY_feedback_to_udp, change_us);
-	if(err != CHIAKI_ERR_SUCCESS)
+		chiaki_feedback_telemetry_sent(feedback_state.left_x, feedback_state.left_y,
+			feedback_state.right_x, feedback_state.right_y);
+	}
+	else
 		CHIAKI_LOGE(feedback_sender->log, "FeedbackSender failed to send Feedback State");
 }
 
@@ -298,6 +310,7 @@ static void *feedback_sender_thread_func(void *user)
 		{
 			// TODO: FEEDBACK_STATE_TIMEOUT_MIN_MS
 			feedback_sender->controller_state_changed = false;
+			feedback_sender->analog_update_pending = false;
 			change_us = feedback_sender->controller_state_changed_us;
 			send_feedback_state = true;
 

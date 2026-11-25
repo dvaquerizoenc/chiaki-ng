@@ -233,6 +233,7 @@ class StreamSession : public QObject
 		unsigned keyboard_directions_held = 0;
 		bool aiming = false;
 		uint64_t mouse_sample_begin_us = 0;
+		uint64_t mouse_last_input_us = 0;
 		ChiakiControllerState touch_state;
 		QMap<int, uint8_t> touch_tracker;
 		int8_t mouse_touch_id;

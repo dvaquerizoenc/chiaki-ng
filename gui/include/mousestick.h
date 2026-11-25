@@ -9,6 +9,7 @@
 enum class MouseStickMode { Off, Left, Right };
 
 enum : int { MouseSensitivityMax = 500, MouseFullTiltDefault = 24, MouseFullTiltMin = 4, MouseFullTiltMax = 256 };
+enum : uint64_t { MouseMotionReferenceUs = 16000 };
 
 inline int calibratedMouseSensitivity(int current, int measuredDistance, int desiredDistance)
 {
@@ -22,6 +23,7 @@ struct MouseStickOptions
 {
     MouseStickMode mode = MouseStickMode::Off;
     bool immediate = true;
+    int velocityWindowMs = 2;
     bool rawInput = true;
     bool lockDuringGameplay = true;
     int lockShortcut = 8;
@@ -78,6 +80,61 @@ struct MouseStickSaturation
     double percent() const { return samples ? 100.0 * saturated / samples : 0.0; }
 };
 
+// Keep the displacement in each measured interval. A sparse report still
+// represents its full interval, even when the trailing window is shorter.
+class MouseVelocityWindow
+{
+public:
+    struct Estimate { MouseStickAxes displacement; uint64_t interval; };
+
+    Estimate push(double dx, double dy, uint64_t now)
+    {
+        constexpr uint64_t horizon = 4000;
+        const bool continuous = last && now > last && now - last <= 24000;
+        const auto interval = continuous ? now - last : uint64_t{8000};
+        if (!continuous || (dx == 0 && dy == 0) ||
+            (count && dx * history[count - 1].dx + dy * history[count - 1].dy < 0))
+            count = 0;
+        const auto start = now >= interval ? now - interval : 0;
+        const auto cutoff = now > horizon ? now - horizon : 0;
+        size_t remaining = 0;
+        for (size_t i = 0; i < count; ++i) {
+            if (history[i].end > cutoff)
+                history[remaining++] = history[i];
+        }
+        count = remaining;
+        if (count == history.size()) {
+            for (size_t i = 1; i < count; ++i)
+                history[i - 1] = history[i];
+            --count;
+        }
+        history[count++] = {start, now, interval, dx, dy};
+        last = now;
+
+        MouseStickAxes total{0, 0};
+        double observed = 0;
+        for (size_t i = 0; i < count; ++i) {
+            const auto &item = history[i];
+            const double overlap = double(item.end - std::max(item.start, cutoff));
+            const double fraction = overlap / item.duration;
+            total.x += item.dx * fraction;
+            total.y += item.dy * fraction;
+            observed += overlap;
+        }
+        if (observed == 0)
+            return {{dx * MouseMotionReferenceUs / interval, dy * MouseMotionReferenceUs / interval}, interval};
+        return {{total.x * MouseMotionReferenceUs / observed, total.y * MouseMotionReferenceUs / observed}, interval};
+    }
+
+    void reset() { count = 0; last = 0; }
+
+private:
+    struct Bin { uint64_t start, end, duration; double dx, dy; };
+    std::array<Bin, 8> history{};
+    size_t count = 0;
+    uint64_t last = 0;
+};
+
 inline uint32_t mouseButtonActions(const MouseStickOptions &options, unsigned pressed, bool touchpad)
 {
     uint32_t actions = 0;
@@ -113,7 +170,7 @@ inline void applyMouseStickAxes(ChiakiControllerState &state, MouseStickMode mod
 class MouseStickMotion
 {
 public:
-    enum : uint64_t { SampleUs = 16000, ReleaseUs = 12000 };
+    enum : uint64_t { SampleUs = MouseMotionReferenceUs, ReleaseUs = 12000 };
 
     MouseStickSample move(const MouseStickOptions &options, double dx, double dy, uint64_t now, bool aiming)
     {
@@ -123,7 +180,23 @@ public:
         // Scale relative movement to the legacy displacement per sampling interval.
         // Time normalization leaves the first motion and the batched mode unscaled.
         const double timeScale = options.immediate ? double(SampleUs) / interval : 1.0;
-        const double scale = timeScale / (100.0 * std::max(1, options.fullTilt));
+        return apply(options, dx * timeScale, dy * timeScale, now, aiming, interval, elapsed, continuing);
+    }
+
+    MouseStickSample moveWindow(const MouseStickOptions &options, double dx, double dy,
+                                uint64_t end, uint64_t lastInput, bool aiming)
+    {
+        const auto estimate = velocity.push(dx, dy, end);
+        const bool continuing = lastMovement && lastInput >= lastMovement && lastInput - lastMovement < holdUs + ReleaseUs;
+        return apply(options, estimate.displacement.x, estimate.displacement.y, lastInput,
+                     aiming, estimate.interval, estimate.interval, continuing);
+    }
+
+private:
+    MouseStickSample apply(const MouseStickOptions &options, double dx, double dy, uint64_t now, bool aiming,
+                           uint64_t interval, uint64_t elapsed, bool continuing)
+    {
+        const double scale = 1.0 / (100.0 * std::max(1, options.fullTilt));
         MouseStickAxes target{dx * scale * (aiming ? options.aimHorizontal : options.horizontal),
                               dy * scale * (aiming ? options.aimVertical : options.vertical)};
         const double radius = std::hypot(target.x, target.y);
@@ -146,6 +219,7 @@ public:
         return {target, radius >= 1.0};
     }
 
+public:
     MouseStickAxes at(uint64_t now) const
     {
         if (!lastMovement || now < lastMovement)
@@ -171,6 +245,7 @@ public:
     void reset() { *this = MouseStickMotion{}; }
 
 private:
+    MouseVelocityWindow velocity;
     MouseStickAxes last{0, 0};
     uint64_t lastMovement = 0;
     uint64_t holdUs = 0;

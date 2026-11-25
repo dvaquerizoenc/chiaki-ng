@@ -283,6 +283,7 @@ public:
 
     void publishLatency()
     {
+        const auto feedback = chiaki_feedback_telemetry_take();
         struct Row { ChiakiLatencyStage stage; const char *label; };
         const Row rows[] = {
             {CHIAKI_LATENCY_mouse_input, QT_TR_NOOP("Mouse handler")},
@@ -369,6 +370,20 @@ public:
                     .arg(saturation.percent(), 0, 'f', 1)
                     .arg(static_cast<qulonglong>(saturation.saturated))
                     .arg(static_cast<qulonglong>(saturation.samples));
+            if (feedback.sent) {
+                const auto &stick = current_session->UsesRightMouseStick() ? feedback.right : feedback.left;
+                text += tr("\nStick sent: avg %1%, max %2%, limit %3% (%4 UDP)")
+                    .arg(100 * stick.magnitude_sum / feedback.sent, 0, 'f', 1)
+                    .arg(100 * stick.magnitude_max, 0, 'f', 1)
+                    .arg(100.0 * stick.at_limit / feedback.sent, 0, 'f', 1)
+                    .arg(static_cast<qulonglong>(feedback.sent));
+            }
+            if (feedback.submitted)
+                text += tr("\nAnalog states replaced: %1/%2")
+                    .arg(static_cast<qulonglong>(feedback.replaced))
+                    .arg(static_cast<qulonglong>(feedback.submitted));
+            if (feedback.omitted)
+                text += tr("\nFeedback measurements omitted: %1").arg(static_cast<qulonglong>(feedback.omitted));
         }
         latencyValue->setText(text);
 

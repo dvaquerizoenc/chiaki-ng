@@ -64,6 +64,19 @@ typedef struct
 	uint64_t p50_us, p95_us, p99_us;
 } ChiakiLatencySummary;
 
+typedef struct
+{
+	uint64_t at_limit;
+	double magnitude_sum;
+	double magnitude_max;
+} ChiakiStickTelemetry;
+
+typedef struct
+{
+	uint64_t submitted, replaced, sent, omitted;
+	ChiakiStickTelemetry left, right;
+} ChiakiFeedbackTelemetry;
+
 CHIAKI_EXPORT void chiaki_latency_set_enabled(bool enabled);
 CHIAKI_EXPORT uint64_t chiaki_latency_begin(void);
 CHIAKI_EXPORT void chiaki_latency_end(ChiakiLatencyStage stage, uint64_t begin_us);
@@ -72,6 +85,9 @@ CHIAKI_EXPORT const char *chiaki_latency_name(ChiakiLatencyStage stage);
 // The consumer supplies space for CHIAKI_LATENCY_BATCH_CAPACITY samples.
 CHIAKI_EXPORT size_t chiaki_latency_drain(ChiakiLatencyStage stage, uint64_t *samples, uint64_t *omitted);
 CHIAKI_EXPORT ChiakiLatencySummary chiaki_latency_summarize(uint64_t *samples, size_t count);
+CHIAKI_EXPORT void chiaki_feedback_telemetry_submit(bool replaced);
+CHIAKI_EXPORT void chiaki_feedback_telemetry_sent(int16_t lx, int16_t ly, int16_t rx, int16_t ry);
+CHIAKI_EXPORT ChiakiFeedbackTelemetry chiaki_feedback_telemetry_take(void);
 
 #ifdef __cplusplus
 }

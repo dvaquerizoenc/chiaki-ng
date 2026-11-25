@@ -817,6 +817,7 @@ QVariantMap QmlSettings::mouseStickOptions() const
         buttons.append(action);
     return {{QStringLiteral("mode"), int(options.mode)},
             {QStringLiteral("immediate"), options.immediate},
+            {QStringLiteral("velocityWindowMs"), options.velocityWindowMs},
             {QStringLiteral("rawInput"), options.rawInput},
             {QStringLiteral("lockDuringGameplay"), options.lockDuringGameplay},
             {QStringLiteral("lockShortcut"), options.lockShortcut},
@@ -853,6 +854,8 @@ void QmlSettings::setMouseStickOption(const QString &name, int value)
         options.mode = static_cast<MouseStickMode>(qBound(0, value, 2));
     else if (name == QStringLiteral("immediate"))
         options.immediate = value != 0;
+    else if (name == QStringLiteral("velocityWindowMs"))
+        options.velocityWindowMs = qBound(0, value, 4);
     else if (name == QStringLiteral("rawInput"))
         options.rawInput = value != 0;
     else if (name == QStringLiteral("lockDuringGameplay"))

@@ -40,8 +40,32 @@ static MunitResult test_omitted_samples(const MunitParameter params[], void *use
 	return MUNIT_OK;
 }
 
+static MunitResult test_feedback_telemetry(const MunitParameter params[], void *user)
+{
+	chiaki_feedback_telemetry_take();
+	chiaki_latency_set_enabled(true);
+	chiaki_feedback_telemetry_submit(false);
+	chiaki_feedback_telemetry_submit(true);
+	chiaki_feedback_telemetry_submit(true);
+	chiaki_feedback_telemetry_sent(0, 0, 16384, 0);
+	chiaki_feedback_telemetry_sent(32767, 0, -32767, 0);
+	chiaki_latency_set_enabled(false);
+	chiaki_feedback_telemetry_sent(0, 0, 0, 0);
+	const ChiakiFeedbackTelemetry stats = chiaki_feedback_telemetry_take();
+	munit_assert_uint64(stats.submitted, ==, 3);
+	munit_assert_uint64(stats.replaced, ==, 2);
+	munit_assert_uint64(stats.sent, ==, 2);
+	munit_assert_uint64(stats.omitted, ==, 0);
+	munit_assert_uint64(stats.right.at_limit, ==, 1);
+	munit_assert_double_equal(stats.right.magnitude_max, 1.0, 9);
+	munit_assert_double_equal(stats.right.magnitude_sum, 1.0 + 16384.0 / 32767, 9);
+	munit_assert_uint64(chiaki_feedback_telemetry_take().sent, ==, 0);
+	return MUNIT_OK;
+}
+
 MunitTest tests_latency[] = {
 	{ "/independent_stages", test_independent_stages, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 	{ "/omitted_samples", test_omitted_samples, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+	{ "/feedback_telemetry", test_feedback_telemetry, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 	{ NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL }
 };

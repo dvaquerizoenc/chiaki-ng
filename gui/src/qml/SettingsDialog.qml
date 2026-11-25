@@ -2396,9 +2396,19 @@ DialogView {
                                 RowLayout {
                                     enabled: mouseControls.options.mode !== 0
                                     CheckBox {
-                                        text: qsTr("Process movement immediately")
+                                        text: qsTr("Use low-latency mouse processing")
                                         checked: mouseControls.options.immediate
                                         onToggled: Chiaki.settings.setMouseStickOption("immediate", checked ? 1 : 0)
+                                        onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                    }
+                                    Label { text: qsTr("Velocity window (ms, 0 = per event)") }
+                                    SpinBox {
+                                        enabled: mouseControls.options.immediate
+                                        from: 0
+                                        to: 4
+                                        value: mouseControls.options.velocityWindowMs
+                                        Accessible.name: qsTr("Velocity window")
+                                        onValueModified: Chiaki.settings.setMouseStickOption("velocityWindowMs", value)
                                         onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
                                     }
                                     CheckBox {
