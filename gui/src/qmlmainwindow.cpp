@@ -219,6 +219,8 @@ public:
 
     void setOverlayVisible(bool visible)
     {
+        if (visible && !overlayRequested && current_session)
+            current_session->TakeMouseSaturation();
         overlayRequested = visible;
         updateCollection();
         if (visible) {
@@ -360,6 +362,14 @@ public:
             text += tr("\nOmitted samples: %1").arg(static_cast<qulonglong>(omittedTotal));
         if (counts[CHIAKI_LATENCY_udp_send_failed])
             text += tr("\nUDP send errors: %1").arg(static_cast<qulonglong>(counts[CHIAKI_LATENCY_udp_send_failed]));
+        if (current_session) {
+            const auto saturation = current_session->TakeMouseSaturation();
+            if (saturation.samples)
+                text += tr("\nMouse at stick limit: %1% (%2/%3)")
+                    .arg(saturation.percent(), 0, 'f', 1)
+                    .arg(static_cast<qulonglong>(saturation.saturated))
+                    .arg(static_cast<qulonglong>(saturation.samples));
+        }
         latencyValue->setText(text);
 
         if (backend && current_session) {

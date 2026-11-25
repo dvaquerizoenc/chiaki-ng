@@ -823,6 +823,7 @@ QVariantMap QmlSettings::mouseStickOptions() const
             {QStringLiteral("vertical"), options.vertical},
             {QStringLiteral("aimHorizontal"), options.aimHorizontal},
             {QStringLiteral("aimVertical"), options.aimVertical},
+            {QStringLiteral("fullTilt"), options.fullTilt},
             {QStringLiteral("deadzone"), options.deadzone},
             {QStringLiteral("smoothingMs"), options.smoothingMs},
             {QStringLiteral("buttons"), buttons}};
@@ -855,13 +856,15 @@ void QmlSettings::setMouseStickOption(const QString &name, int value)
     else if (name == QStringLiteral("wasd"))
         options.wasd = value != 0;
     else if (name == QStringLiteral("horizontal"))
-        options.horizontal = qBound(1, value, 400);
+        options.horizontal = qBound(1, value, int(MouseSensitivityMax));
     else if (name == QStringLiteral("vertical"))
-        options.vertical = qBound(1, value, 400);
+        options.vertical = qBound(1, value, int(MouseSensitivityMax));
     else if (name == QStringLiteral("aimHorizontal"))
-        options.aimHorizontal = qBound(1, value, 400);
+        options.aimHorizontal = qBound(1, value, int(MouseSensitivityMax));
     else if (name == QStringLiteral("aimVertical"))
-        options.aimVertical = qBound(1, value, 400);
+        options.aimVertical = qBound(1, value, int(MouseSensitivityMax));
+    else if (name == QStringLiteral("fullTilt"))
+        options.fullTilt = qBound(int(MouseFullTiltMin), value, int(MouseFullTiltMax));
     else if (name == QStringLiteral("deadzone"))
         options.deadzone = qBound(0, value, 40);
     else if (name == QStringLiteral("smoothingMs"))
@@ -872,6 +875,11 @@ void QmlSettings::setMouseStickOption(const QString &name, int value)
     emit mouseStickOptionsChanged();
     if (name == QStringLiteral("mode") || name == QStringLiteral("wasd"))
         emit controllerMappingChanged();
+}
+
+int QmlSettings::estimateMouseSensitivity(int current, int measuredDistance, int desiredDistance) const
+{
+    return calibratedMouseSensitivity(current, measuredDistance, desiredDistance);
 }
 
 void QmlSettings::setMouseButtonAction(int button, int action)

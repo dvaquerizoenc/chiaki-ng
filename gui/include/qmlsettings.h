@@ -552,6 +552,7 @@ public:
     QVariantMap mouseStickOptions() const;
     QVariantList mouseButtonActions() const;
     Q_INVOKABLE void setMouseStickOption(const QString &name, int value);
+    Q_INVOKABLE int estimateMouseSensitivity(int current, int measuredDistance, int desiredDistance) const;
     Q_INVOKABLE void setMouseButtonAction(int button, int action);
 
     bool keyboardEnabled() const;

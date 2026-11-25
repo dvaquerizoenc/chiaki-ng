@@ -1004,10 +1004,11 @@ MouseStickOptions Settings::GetMouseStickOptions() const
 	options.immediate = settings.value("settings/mouse_immediate", true).toBool();
 	options.rawInput = settings.value("settings/mouse_raw_input", true).toBool();
 	options.wasd = settings.value("settings/mouse_wasd", true).toBool();
-	options.horizontal = qBound(1, settings.value("settings/mouse_sensitivity_x", 100).toInt(), 400);
-	options.vertical = qBound(1, settings.value("settings/mouse_sensitivity_y", 100).toInt(), 400);
-	options.aimHorizontal = qBound(1, settings.value("settings/mouse_aim_sensitivity_x", 55).toInt(), 400);
-	options.aimVertical = qBound(1, settings.value("settings/mouse_aim_sensitivity_y", 55).toInt(), 400);
+	options.horizontal = qBound(1, settings.value("settings/mouse_sensitivity_x", 100).toInt(), int(MouseSensitivityMax));
+	options.vertical = qBound(1, settings.value("settings/mouse_sensitivity_y", 100).toInt(), int(MouseSensitivityMax));
+	options.aimHorizontal = qBound(1, settings.value("settings/mouse_aim_sensitivity_x", 55).toInt(), int(MouseSensitivityMax));
+	options.aimVertical = qBound(1, settings.value("settings/mouse_aim_sensitivity_y", 55).toInt(), int(MouseSensitivityMax));
+	options.fullTilt = qBound(int(MouseFullTiltMin), settings.value("settings/mouse_full_tilt", int(MouseFullTiltDefault)).toInt(), int(MouseFullTiltMax));
 	options.deadzone = qBound(0, settings.value("settings/mouse_deadzone", 0).toInt(), 40);
 	options.smoothingMs = qBound(0, settings.value("settings/mouse_smoothing_ms", 0).toInt(), 60);
 	for (size_t i = 0; i < options.buttons.size(); ++i) {
@@ -1029,6 +1030,7 @@ void Settings::SetMouseStickOptions(const MouseStickOptions &options)
 	settings.setValue("settings/mouse_sensitivity_y", options.vertical);
 	settings.setValue("settings/mouse_aim_sensitivity_x", options.aimHorizontal);
 	settings.setValue("settings/mouse_aim_sensitivity_y", options.aimVertical);
+	settings.setValue("settings/mouse_full_tilt", options.fullTilt);
 	settings.setValue("settings/mouse_deadzone", options.deadzone);
 	settings.setValue("settings/mouse_smoothing_ms", options.smoothingMs);
 	for (size_t i = 0; i < options.buttons.size(); ++i)

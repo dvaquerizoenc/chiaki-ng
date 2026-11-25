@@ -10,6 +10,10 @@ Choose **Left stick** for mouse-driven movement or **Disabled** to leave both st
 
 During a stream, **Show stream stats** displays local latency percentiles and sample counts once a second. Set `CHIAKI_LATENCY_CSV` to a new file path before launching to export individual samples as `metric,value_ms`. Use a separate file per run. Frame age starts at decoded output and ends at frame mapping. Swap timings end when the application returns from the presentation call. Measure presentation on screen separately.
 
+The **Full stick** threshold is the radial mouse movement needed to reach full tilt at 100% sensitivity, normalized to 16 ms in immediate mode. The default is 24 raw counts (or logical pixels with Qt mouse events). Lower values increase gain and reach full tilt sooner. Stream Stats reports the proportion and count of processed motion samples that asked for full tilt before deadzone compensation and smoothing. With 16 ms sampling enabled, each batch counts as one sample.
+
+Use **Calibrate sensitivity with a 360° turn** to estimate horizontal camera or aim sensitivity from the measured and target distances. Measure a slow turn around a landmark with the game settings, DPI and threshold fixed. Repeat the measurement after applying the estimate because the game's stick response may be nonlinear. An optional fast-turn measurement helps expose a difference in travel. When many samples reach the limit, raise the full-stick threshold or lower the client gain to preserve differences between faster movements. If a sustained full stick still turns too slowly, adjust the game's look or aim sensitivity. Chiaki discards excess movement above full tilt so it cannot add a turn after you stop.
+
 ## Configuring Steam Deck Controller Profile
 
 !!! Tip

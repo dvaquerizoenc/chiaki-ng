@@ -225,6 +225,7 @@ class StreamSession : public QObject
 		QTimer *mouse_release_timer;
 		MouseStickOptions mouse_options;
 		MouseStickMotion mouse_motion;
+		MouseStickSaturation mouse_saturation;
 		QPointF mouse_stick_delta;
 		QPoint mouse_stick_axes;
 		bool mouse_stick_sample_pending = false;
@@ -388,6 +389,7 @@ class StreamSession : public QObject
 		bool UsesWasdControls() const { return keyboard_controller_enabled && mouse_options.mode == MouseStickMode::Right && mouse_options.wasd; }
 		bool UsesRawMouseInput() const { return mouse_options.rawInput; }
 		void HandleMouseStickMovement(const QPointF &delta);
+		MouseStickSaturation TakeMouseSaturation();
 		void ResetMouseStick();
 		void ResetMouseInput(bool releaseKeyboard = false);
 #if CHIAKI_GUI_ENABLE_SPEEX

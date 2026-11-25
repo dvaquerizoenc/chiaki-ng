@@ -2414,10 +2414,11 @@ DialogView {
                                     enabled: mouseControls.options.mode !== 0
                                     Repeater {
                                         model: [
-                                            { key: "horizontal", label: qsTr("Horizontal (%)"), min: 1, max: 400 },
-                                            { key: "vertical", label: qsTr("Vertical (%)"), min: 1, max: 400 },
-                                            { key: "aimHorizontal", label: qsTr("Aim horizontal (%)"), min: 1, max: 400 },
-                                            { key: "aimVertical", label: qsTr("Aim vertical (%)"), min: 1, max: 400 },
+                                            { key: "horizontal", label: qsTr("Horizontal (%)"), min: 1, max: 500 },
+                                            { key: "vertical", label: qsTr("Vertical (%)"), min: 1, max: 500 },
+                                            { key: "aimHorizontal", label: qsTr("Aim horizontal (%)"), min: 1, max: 500 },
+                                            { key: "aimVertical", label: qsTr("Aim vertical (%)"), min: 1, max: 500 },
+                                            { key: "fullTilt", label: qsTr("Full stick (counts per 16 ms at 100%)"), min: 4, max: 256 },
                                             { key: "deadzone", label: qsTr("Deadzone compensation (%)"), min: 0, max: 40 },
                                             { key: "smoothingMs", label: qsTr("Smoothing (ms, 0 = off)"), min: 0, max: 60 }
                                         ]
@@ -2435,6 +2436,12 @@ DialogView {
                                             }
                                         }
                                     }
+                                }
+                                Button {
+                                    text: qsTr("Calibrate sensitivity with a 360° turn")
+                                    enabled: mouseControls.options.mode === 2
+                                    onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                                    onClicked: mouseCalibration.open()
                                 }
                                 GridLayout {
                                     columns: 3
@@ -3208,6 +3215,61 @@ DialogView {
                         but WITHOUT ANY WARRANTY; without even the implied warranty of
                         MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
                         GNU General Public License for more details.</p>".arg(Qt.application.version)
+                }
+            }
+        }
+
+        Dialog {
+            id: mouseCalibration
+            parent: Overlay.overlay
+            anchors.centerIn: parent
+            modal: true
+            focus: true
+            title: qsTr("360° sensitivity calibration")
+            standardButtons: Dialog.Close
+
+            ColumnLayout {
+                Label {
+                    Layout.preferredWidth: 440
+                    wrapMode: Text.WordWrap
+                    text: qsTr("In the game, pick a landmark and measure how far you move the mouse for one slow, complete horizontal turn. Keep DPI, the full-stick threshold and the game’s sensitivity fixed. Enter the distance here and repeat the turn after applying the estimate.")
+                }
+                GridLayout {
+                    columns: 2
+                    Label { text: qsTr("Calibration mode") }
+                    C.ComboBox {
+                        id: calibrationMode
+                        model: [qsTr("Camera"), qsTr("Aim (hold L2 during measurement)")]
+                    }
+                    Label { text: qsTr("Slow 360° distance (mm)") }
+                    SpinBox { id: slowTurn; from: 0; to: 3000; editable: true }
+                    Label { text: qsTr("Target 360° distance (mm)") }
+                    SpinBox { id: targetTurn; from: 1; to: 3000; value: 300; editable: true }
+                    Label { text: qsTr("Fast 360° distance (mm, optional)") }
+                    SpinBox { id: fastTurn; from: 0; to: 3000; editable: true }
+                }
+                Label {
+                    Layout.preferredWidth: 440
+                    wrapMode: Text.WordWrap
+                    visible: slowTurn.value > 0 && fastTurn.value > slowTurn.value * 1.1
+                    text: qsTr("The fast turn took more mouse travel. Check the stick-limit percentage in Stream Stats. Try leaving more stick headroom or raising the game’s look or aim sensitivity.")
+                }
+                RowLayout {
+                    readonly property string option: calibrationMode.currentIndex === 1 ? "aimHorizontal" : "horizontal"
+                    readonly property int current: Chiaki.settings.mouseStickOptions[option]
+                    readonly property int estimate: Chiaki.settings.estimateMouseSensitivity(current, slowTurn.value, targetTurn.value)
+                    Label {
+                        text: parent.estimate > 0 ? qsTr("Estimated horizontal sensitivity: %1%").arg(parent.estimate)
+                                                  : qsTr("Enter your measured slow turn to calculate")
+                    }
+                    Button {
+                        text: qsTr("Apply and close")
+                        enabled: parent.estimate > 0
+                        onClicked: {
+                            Chiaki.settings.setMouseStickOption(parent.option, parent.estimate);
+                            mouseCalibration.close();
+                        }
+                    }
                 }
             }
         }

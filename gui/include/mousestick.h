@@ -8,6 +8,16 @@
 
 enum class MouseStickMode { Off, Left, Right };
 
+enum : int { MouseSensitivityMax = 500, MouseFullTiltDefault = 24, MouseFullTiltMin = 4, MouseFullTiltMax = 256 };
+
+inline int calibratedMouseSensitivity(int current, int measuredDistance, int desiredDistance)
+{
+    if (current <= 0 || measuredDistance <= 0 || desiredDistance <= 0)
+        return 0;
+    const double estimate = double(current) * measuredDistance / desiredDistance;
+    return int(std::lround(std::max(1.0, std::min(double(MouseSensitivityMax), estimate))));
+}
+
 struct MouseStickOptions
 {
     MouseStickMode mode = MouseStickMode::Off;
@@ -18,6 +28,7 @@ struct MouseStickOptions
     int vertical = 100;
     int aimHorizontal = 55;
     int aimVertical = 55;
+    int fullTilt = MouseFullTiltDefault;
     int deadzone = 0;
     int smoothingMs = 0;
     static constexpr int DefaultButton = -1;
@@ -43,6 +54,26 @@ struct MouseStickAxes
 {
     double x;
     double y;
+};
+
+struct MouseStickSample
+{
+    MouseStickAxes axes;
+    bool saturated;
+};
+
+struct MouseStickSaturation
+{
+    uint64_t samples = 0;
+    uint64_t saturated = 0;
+
+    void record(bool reachedLimit)
+    {
+        ++samples;
+        saturated += reachedLimit;
+    }
+
+    double percent() const { return samples ? 100.0 * saturated / samples : 0.0; }
 };
 
 inline uint32_t mouseButtonActions(const MouseStickOptions &options, unsigned pressed, bool touchpad)
@@ -82,14 +113,15 @@ class MouseStickMotion
 public:
     enum : uint64_t { SampleUs = 16000, ReleaseUs = 12000 };
 
-    MouseStickAxes move(const MouseStickOptions &options, double dx, double dy, uint64_t now, bool aiming)
+    MouseStickSample move(const MouseStickOptions &options, double dx, double dy, uint64_t now, bool aiming)
     {
         const bool continuing = lastMovement && now >= lastMovement && now - lastMovement < holdUs + ReleaseUs;
         const uint64_t elapsed = continuing ? std::max<uint64_t>(1000, now - lastMovement) : SampleUs;
         const auto interval = std::min<uint64_t>(elapsed, SampleUs);
         // Scale relative movement to the legacy displacement per sampling interval.
         // Time normalization leaves the first motion and the batched mode unscaled.
-        const double scale = (options.immediate ? double(SampleUs) / interval : 1.0) / 2400.0;
+        const double timeScale = options.immediate ? double(SampleUs) / interval : 1.0;
+        const double scale = timeScale / (100.0 * std::max(1, options.fullTilt));
         MouseStickAxes target{dx * scale * (aiming ? options.aimHorizontal : options.horizontal),
                               dy * scale * (aiming ? options.aimVertical : options.vertical)};
         const double radius = std::hypot(target.x, target.y);
@@ -109,7 +141,7 @@ public:
         lastMovement = now;
         holdUs = options.immediate ? std::max<uint64_t>(4000, std::min<uint64_t>(12000, interval * 2)) : SampleUs;
         last = target;
-        return target;
+        return {target, radius >= 1.0};
     }
 
     MouseStickAxes at(uint64_t now) const

@@ -992,10 +992,19 @@ void StreamSession::HandleMouseStickMovement(const QPointF &delta)
 void StreamSession::ApplyMouseStick(const QPointF &delta, uint64_t begin_us)
 {
 	const auto now_us = chiaki_time_now_monotonic_us();
-	if(SetMouseStickAxes(mouse_motion.move(mouse_options, delta.x(), delta.y(), now_us, aiming)))
+	const auto sample = mouse_motion.move(mouse_options, delta.x(), delta.y(), now_us, aiming);
+	mouse_saturation.record(sample.saturated);
+	if(SetMouseStickAxes(sample.axes))
 		chiaki_latency_end(CHIAKI_LATENCY_mouse_to_state, begin_us);
 	if(!mouse_release_timer->isActive())
 		ScheduleMouseRelease(now_us);
+}
+
+MouseStickSaturation StreamSession::TakeMouseSaturation()
+{
+	const auto result = mouse_saturation;
+	mouse_saturation = {};
+	return result;
 }
 
 bool StreamSession::SetMouseStickAxes(MouseStickAxes axes)
