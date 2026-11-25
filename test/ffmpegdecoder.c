@@ -6,6 +6,8 @@
 
 #include <libavutil/frame.h>
 #include <libavutil/avutil.h>
+#include <libavutil/mem.h>
+#include <limits.h>
 
 /* Helper: allocate an AVFrame with both timestamp fields set to AV_NOPTS_VALUE */
 static AVFrame *alloc_blank_frame(void)
@@ -161,7 +163,25 @@ static MunitResult test_duration_120fps(const MunitParameter params[], void *use
 	return MUNIT_OK;
 }
 
+static MunitResult test_packet_allocation_failure(const MunitParameter params[], void *user)
+{
+	ChiakiFfmpegDecoder decoder = {0};
+	munit_assert_int(chiaki_ffmpeg_decoder_init(&decoder, NULL, CHIAKI_CODEC_H264, 60,
+		NULL, NULL, NULL, NULL), ==, CHIAKI_ERR_SUCCESS);
+	uint8_t sample = 0;
+	av_max_alloc(1);
+	const bool success = chiaki_ffmpeg_decoder_video_sample_cb(&sample, sizeof(sample), 1, true, &decoder);
+	av_max_alloc(INT_MAX);
+	munit_assert_false(success);
+	munit_assert_int(decoder.frames_lost, ==, 0);
+	munit_assert_false(decoder.frame_recovered);
+	chiaki_ffmpeg_decoder_fini(&decoder);
+	return MUNIT_OK;
+}
+
 MunitTest tests_ffmpegdecoder[] = {
+	{ "/packet_allocation_failure", test_packet_allocation_failure,
+		NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 	{
 		"/pts_from_best_effort",
 		test_pts_from_best_effort,

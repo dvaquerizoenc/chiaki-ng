@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 
 #include <settings.h>
+#include "controllerkeys.h"
 #include <SDL.h>
 #include <QFile>
 #include <QFileInfo>
 #include <QUrl>
-#include <QKeySequence>
 #include <QCoreApplication>
 
 #include <chiaki/config.h>
@@ -996,14 +996,51 @@ void Settings::SetMouseTouchEnabled(bool enabled)
 	settings.setValue("settings/mouse_touch_enabled", enabled);
 }
 
-bool Settings::GetMouseLeftStickEnabled() const
+MouseStickOptions Settings::GetMouseStickOptions() const
 {
-	return settings.value("settings/mouse_left_stick_enabled", false).toBool();
+	MouseStickOptions options;
+	const bool legacyLeft = settings.value("settings/mouse_left_stick_enabled", false).toBool();
+	options.mode = static_cast<MouseStickMode>(qBound(0, settings.value("settings/mouse_stick_mode", legacyLeft ? 1 : 0).toInt(), 2));
+	options.immediate = settings.value("settings/mouse_immediate", true).toBool();
+	options.velocityWindowMs = qBound(0, settings.value("settings/mouse_velocity_window_ms", 2).toInt(), 4);
+	options.rawInput = settings.value("settings/mouse_raw_input", true).toBool();
+	options.lockDuringGameplay = settings.value("settings/mouse_lock_during_gameplay", true).toBool();
+	options.lockShortcut = qBound(0, settings.value("settings/mouse_lock_shortcut", 8).toInt(), 12);
+	options.wasd = settings.value("settings/mouse_wasd", true).toBool();
+	options.horizontal = qBound(1, settings.value("settings/mouse_sensitivity_x", 100).toInt(), int(MouseSensitivityMax));
+	options.vertical = qBound(1, settings.value("settings/mouse_sensitivity_y", 100).toInt(), int(MouseSensitivityMax));
+	options.aimHorizontal = qBound(1, settings.value("settings/mouse_aim_sensitivity_x", 55).toInt(), int(MouseSensitivityMax));
+	options.aimVertical = qBound(1, settings.value("settings/mouse_aim_sensitivity_y", 55).toInt(), int(MouseSensitivityMax));
+	options.fullTilt = qBound(int(MouseFullTiltMin), settings.value("settings/mouse_full_tilt", int(MouseFullTiltDefault)).toInt(), int(MouseFullTiltMax));
+	options.deadzone = qBound(0, settings.value("settings/mouse_deadzone", 0).toInt(), 40);
+	options.smoothingMs = qBound(0, settings.value("settings/mouse_smoothing_ms", 0).toInt(), 60);
+	for (size_t i = 0; i < options.buttons.size(); ++i) {
+		const int action = settings.value(QStringLiteral("settings/mouse_button_%1").arg(static_cast<int>(i)), MouseStickOptions::DefaultButton).toInt();
+		const int supported = (1 << (CHIAKI_CONTROLLER_BUTTONS_COUNT + 2)) - 1;
+		if (action == MouseStickOptions::DefaultButton || (action >= 0 && action <= supported && (action & (action - 1)) == 0))
+			options.buttons[i] = action;
+	}
+	return options;
 }
 
-void Settings::SetMouseLeftStickEnabled(bool enabled)
+void Settings::SetMouseStickOptions(const MouseStickOptions &options)
 {
-	settings.setValue("settings/mouse_left_stick_enabled", enabled);
+	settings.setValue("settings/mouse_stick_mode", static_cast<int>(options.mode));
+	settings.setValue("settings/mouse_immediate", options.immediate);
+	settings.setValue("settings/mouse_velocity_window_ms", options.velocityWindowMs);
+	settings.setValue("settings/mouse_raw_input", options.rawInput);
+	settings.setValue("settings/mouse_lock_during_gameplay", options.lockDuringGameplay);
+	settings.setValue("settings/mouse_lock_shortcut", options.lockShortcut);
+	settings.setValue("settings/mouse_wasd", options.wasd);
+	settings.setValue("settings/mouse_sensitivity_x", options.horizontal);
+	settings.setValue("settings/mouse_sensitivity_y", options.vertical);
+	settings.setValue("settings/mouse_aim_sensitivity_x", options.aimHorizontal);
+	settings.setValue("settings/mouse_aim_sensitivity_y", options.aimVertical);
+	settings.setValue("settings/mouse_full_tilt", options.fullTilt);
+	settings.setValue("settings/mouse_deadzone", options.deadzone);
+	settings.setValue("settings/mouse_smoothing_ms", options.smoothingMs);
+	for (size_t i = 0; i < options.buttons.size(); ++i)
+		settings.setValue(QStringLiteral("settings/mouse_button_%1").arg(static_cast<int>(i)), options.buttons[i]);
 }
 
 
@@ -2409,11 +2446,14 @@ QString Settings::GetChiakiControllerButtonName(int button)
 
 void Settings::SetControllerButtonMapping(int chiaki_button, Qt::Key key)
 {
-	auto button_name = GetChiakiControllerButtonName(chiaki_button).replace(' ', '_').toLower();
-	settings.setValue("keymap/" + button_name, QKeySequence(key).toString());
+	const auto changes = controllerKeyChanges(GetControllerMapping(false), chiaki_button, controllerKey(key));
+	for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
+		const auto button_name = GetChiakiControllerButtonName(it.key()).replace(' ', '_').toLower();
+		settings.setValue("keymap/" + button_name, writeControllerKey(it.value()));
+	}
 }
 
-QMap<int, Qt::Key> Settings::GetControllerMapping()
+QMap<int, Qt::Key> Settings::GetControllerMapping(bool includeWasd)
 {
 	// Initialize with default values
 	QMap<int, Qt::Key> result =
@@ -2452,9 +2492,20 @@ QMap<int, Qt::Key> Settings::GetControllerMapping()
 	{
 		auto button_name = GetChiakiControllerButtonName(chiaki_button).replace(' ', '_').toLower();
 		if(settings.contains("keymap/" + button_name))
-			result[static_cast<int>(chiaki_button)] = QKeySequence(settings.value("keymap/" + button_name).toString())[0].key();
+			result[static_cast<int>(chiaki_button)] = readControllerKey(settings.value("keymap/" + button_name).toString());
 	}
 
+	const auto mouse = GetMouseStickOptions();
+	if (includeWasd && mouse.mode == MouseStickMode::Right && mouse.wasd) {
+		for (auto &key : result) {
+			if (key == Qt::Key_W || key == Qt::Key_A || key == Qt::Key_S || key == Qt::Key_D)
+				key = Qt::Key_unknown;
+		}
+		result[int(ControllerButtonExt::ANALOG_STICK_LEFT_Y_UP)] = Qt::Key_W;
+		result[int(ControllerButtonExt::ANALOG_STICK_LEFT_X_DOWN)] = Qt::Key_A;
+		result[int(ControllerButtonExt::ANALOG_STICK_LEFT_Y_DOWN)] = Qt::Key_S;
+		result[int(ControllerButtonExt::ANALOG_STICK_LEFT_X_UP)] = Qt::Key_D;
+	}
 	return result;
 }
 
@@ -2507,7 +2558,8 @@ QMap<Qt::Key, int> Settings::GetControllerMappingForDecoding()
 	QMap<Qt::Key, int> result;
 	for(auto it = map.begin(); it != map.end(); ++it)
 	{
-		result[it.value()] = it.key();
+		if (it.value() != Qt::Key_unknown)
+			result[it.value()] = it.key();
 	}
 	return result;
 }

@@ -177,9 +177,11 @@ public:
 
     void goToSleep();
 
-    bool zeroCopy()        { return !disable_zero_copy; };
-    void disableZeroCopy() { disable_zero_copy = true; };
-    void enableZeroCopy()  { disable_zero_copy = false; };
+    bool zeroCopy() const { return disable_zero_copy.loadAcquire() == 0; }
+    void disableZeroCopy() { disable_zero_copy.storeRelease(1); }
+    void enableZeroCopy()  { disable_zero_copy.storeRelease(0); }
+    int hardwareFrameFormat() const { return hardware_frame_format.loadAcquire(); }
+    bool lastHardwareFrameMappedDirectly() const { return direct_hardware_frame.loadAcquire() != 0 && zeroCopy(); }
 
     Q_INVOKABLE void deleteHost(int index);
     Q_INVOKABLE void wakeUpHost(int index, QString nickname = QString());
@@ -311,7 +313,9 @@ private:
     bool updating_psn_hosts = false;
     QFutureWatcher<void> psn_hosts_watcher;
     QFuture<void> psn_hosts_future;
-    bool disable_zero_copy = false;
+    QAtomicInteger<int> disable_zero_copy{0};
+    QAtomicInteger<int> hardware_frame_format{-1};
+    QAtomicInteger<int> direct_hardware_frame{0};
     QMutex hw_transfer_state_mutex;
     QSet<int> logged_hw_transfer_formats;
     QSet<int> logged_hw_transfer_failures;

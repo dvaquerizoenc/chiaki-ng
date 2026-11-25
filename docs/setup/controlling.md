@@ -1,10 +1,20 @@
 # Controller Configuration
 
-## Using the Mouse as the Left Stick
+## Using a Keyboard and Mouse
 
-In the desktop app, open **Settings → Keys** and enable **Mouse as left stick (L3)** before starting a stream. Move the mouse inside the stream window to tilt the left stick. Faster movement tilts it further, and the stick centers when the mouse stops. A keyboard binding for the left stick takes priority while held. The L3 button press still uses its own key binding.
+In the desktop app, open **Settings → Keys → Mouse controls** and choose **Right stick (camera)** for a PC-style layout. With **Keyboard as controller** and **WASD for left stick** enabled, WASD takes precedence over custom bindings for those keys and Ctrl+S keeps moving backward during play. Left click sends R2 and right click sends L2 by default. L2 selects the separate horizontal and vertical aim sensitivities. The five mouse buttons can each be assigned a controller action.
 
-With **Enable Mouse Touchpad** turned on, dragging with the left mouse button controls the touchpad. On native Wayland the pointer stays where you move it, so reverse direction to bring it away from a screen edge.
+Choose **Left stick** for mouse-driven movement or **Disabled** to leave both sticks to the keyboard or gamepad. With **Enable Mouse Touchpad** on, an unassigned left button can still drag the touchpad. On native Wayland the pointer stays where you move it.
+
+**Use low-latency mouse processing** starts a 2 ms window when motion arrives. Chiaki adds the deltas and estimates speed over up to 4 ms of measured history. For sparse input it still divides the displacement by the full measured interval between groups. The first group assumes 8 ms because there is no preceding timing sample. Select a 1–4 ms window or select 0 to compare against the older per-event estimate. Turning low-latency processing off uses the existing 16 ms sampling path. **Use Windows Raw Input** works with either stick. Raw Input uses device counts, so Windows pointer acceleration and DPI scaling can change how the Qt fallback feels. Keep smoothing at 0 for the unfiltered response. Reconnect the stream to apply changes. The `CHIAKI_MOUSE_EVENT_INPUT` and `CHIAKI_MOUSE_RAW_INPUT` environment variables still override the corresponding settings when present.
+
+On Windows, **Lock mouse during gameplay** automatically confines the cursor when a **Right stick (camera)** stream starts with Raw Input enabled. Press **F8** to release or recapture it for the current session. Choose another function key or disable the shortcut under **Mouse lock shortcut**. Opening a menu, switching applications, or minimizing temporarily releases the cursor. A manual release stays in effect when you return to the stream.
+
+During a stream, **Show stream stats** displays local latency percentiles and sample counts once a second. Set `CHIAKI_LATENCY_CSV` to a new file path before launching to export individual samples as `metric,value_ms`. Use a separate file per run. Frame age starts at decoded output and ends at frame mapping. Swap timings end when the application returns from the presentation call. Measure presentation on screen separately.
+
+The **Full stick** threshold is the radial mouse movement needed to reach full tilt at 100% sensitivity, normalized to 16 ms in low-latency mode. The default is 24 raw counts (or logical pixels with Qt mouse events). Lower values increase gain and reach full tilt sooner. Stream Stats reports the proportion and count of processed windows that asked for full tilt before deadzone compensation and smoothing. It also reports average and peak stick tilt and the proportion at the limit for feedback packets successfully handed to UDP, after input merging. It counts pending analog states replaced before the feedback thread read them. These measurements describe the client. Use an on-screen measurement for the console's response.
+
+Use **Calibrate sensitivity with a 360° turn** to estimate horizontal camera or aim sensitivity from the measured and target distances. Measure a slow turn around a landmark with the game settings, DPI and threshold fixed. Repeat the measurement after applying the estimate because the game's stick response may be nonlinear. An optional fast-turn measurement helps expose a difference in travel. When many samples reach the limit, raise the full-stick threshold or lower the client gain to preserve differences between faster movements. If a sustained full stick still turns too slowly, adjust the game's look or aim sensitivity. Chiaki discards excess movement above full tilt so it cannot add a turn after you stop.
 
 ## Configuring Steam Deck Controller Profile
 

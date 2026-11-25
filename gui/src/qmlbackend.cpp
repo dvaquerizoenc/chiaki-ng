@@ -1,4 +1,6 @@
 #include "qmlbackend.h"
+#include <chiaki/latency.h>
+#include <cstring>
 #include "qmlsettings.h"
 #include "qmlmainwindow.h"
 #include "streamsession.h"
@@ -458,11 +460,11 @@ bool QmlBackend::prepareFrameForPresentation(ChiakiFfmpegFrame &frame, bool use_
     if (frame.frame->format == AV_PIX_FMT_NONE)
         return false;
 
-    if (!frame.frame->hw_frames_ctx)
-        return frame_has_planes(frame.frame);
-
-    const bool direct_render = !disable_zero_copy && frame_can_use_direct_render(frame.frame, use_opengl_renderer);
-    if (direct_render)
+    hardware_frame_format.storeRelease(frame.frame->hw_frames_ctx ? frame.frame->format : AV_PIX_FMT_NONE);
+    const bool direct_render = frame.frame->hw_frames_ctx && zeroCopy() &&
+                               frame_can_use_direct_render(frame.frame, use_opengl_renderer);
+    direct_hardware_frame.storeRelease(direct_render);
+    if (!frame.frame->hw_frames_ctx || direct_render)
         return frame_has_planes(frame.frame);
 
     const int format = frame.frame->format;
@@ -480,6 +482,7 @@ bool QmlBackend::prepareFrameForPresentation(ChiakiFfmpegFrame &frame, bool use_
     if (!sw_frame)
         return false;
 
+    const auto transfer_begin_us = chiaki_latency_begin();
     if (av_hwframe_transfer_data(sw_frame, frame.frame, 0) < 0) {
         bool should_log_failure = false;
         {
@@ -497,6 +500,7 @@ bool QmlBackend::prepareFrameForPresentation(ChiakiFfmpegFrame &frame, bool use_
         av_frame_free(&sw_frame);
         return false;
     }
+    chiaki_latency_end(CHIAKI_LATENCY_ram_transfer, transfer_begin_us);
 
     av_frame_copy_props(sw_frame, frame.frame);
     av_frame_free(&frame.frame);
@@ -971,7 +975,9 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
 
     session_info = connect_info;
     window->setStreamMaxFPS(connect_info.video_profile.max_fps);
-    disable_zero_copy = !settings->GetUseZeroCopy();
+    disable_zero_copy.storeRelease(!settings->GetUseZeroCopy());
+    hardware_frame_format.storeRelease(AV_PIX_FMT_NONE);
+    direct_hardware_frame.storeRelease(0);
     {
         QMutexLocker locker(&hw_transfer_state_mutex);
         logged_hw_transfer_formats.clear();
@@ -1130,6 +1136,7 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
         ChiakiFfmpegFrame frame = chiaki_ffmpeg_decoder_pull_frame(decoder, &frames_lost);
         if (!frame.frame)
             return;
+        const auto frame_ready_us = chiaki_latency_begin();
         logDecoderDeliveryStats(static_cast<qint64>(chiaki_time_now_monotonic_us()), frames_lost, frame.recovered);
         logDecoderFramePtsStats(static_cast<qint64>(chiaki_time_now_monotonic_us()), frame.pts, frame.duration);
         if (frame.recovered)
@@ -1142,6 +1149,15 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
             return;
         }
         const qint64 prepare_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
+        if (frame_ready_us && prepare_end_us >= prepare_begin_us) {
+            chiaki_latency_record(CHIAKI_LATENCY_prepare_frame, prepare_end_us - prepare_begin_us);
+            // opaque_ref is application-owned and follows the AVFrame's clones.
+            if (!frame.frame->opaque_ref) {
+                frame.frame->opaque_ref = av_buffer_alloc(sizeof(frame_ready_us));
+                if (frame.frame->opaque_ref)
+                    std::memcpy(frame.frame->opaque_ref->data, &frame_ready_us, sizeof(frame_ready_us));
+            }
+        }
         if (prepare_end_us >= prepare_begin_us && prepare_end_us - prepare_begin_us >= 5000) {
             CHIAKI_NOISY_DEBUG().nospace()
                 << "[decode] prepare_frame_us=" << (prepare_end_us - prepare_begin_us)

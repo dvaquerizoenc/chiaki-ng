@@ -2,6 +2,8 @@
 
 #include "streamsession.h"
 #include "settings.h"
+#include "controllerkeys.h"
+#include "mouselock.h"
 
 #include <QMutex>
 #include <QAtomicInteger>
@@ -148,6 +150,7 @@ public:
 
     Q_INVOKABLE void grabInput();
     Q_INVOKABLE void releaseInput();
+    Q_INVOKABLE void setControllerKeyCaptureActive(bool active);
     Q_INVOKABLE void requestOverlayUpdate();
     Q_INVOKABLE void setOverlayInteractionActive(bool active);
     Q_INVOKABLE void setStatsOverlayActive(bool active);
@@ -182,6 +185,7 @@ signals:
     void pendingFrameAgeChanged();
     void loadingTransitionCompleteChanged();
     void statsOverlayActiveChanged();
+    void controllerKeyCaptured(int key);
 
 private:
     friend class BufferedPlaybackPacerThread;
@@ -265,8 +269,22 @@ private:
     void refreshPendingFrameAge();
     void snapshotPendingFrame();
     bool handleShortcut(QKeyEvent *event);
-    void handleMouseLeftStick(QMouseEvent *event);
-    void resetMouseLeftStick();
+    void handleMouseStick(QMouseEvent *event);
+    void resetMouseStick();
+    ControllerKeyCapture controller_key_capture;
+#ifdef Q_OS_WIN
+    bool nativeEvent(const QByteArray &event_type, void *message, qintptr *result) override;
+    void updateRawMouseInput();
+    void setRawMouseInput(bool enabled);
+    void updateMouseLock();
+    void releaseMouseLock();
+    bool canLockMouse() const;
+    MouseLockState mouse_lock;
+    RECT mouse_clip_rect{};
+    bool mouse_clip_active = false;
+    bool raw_mouse_registered = false;
+    bool raw_mouse_uses_legacy = false;
+#endif
     bool event(QEvent *event) override;
     QObject *focusObject() const override;
     void updateQueueDepthAverage(int depth);

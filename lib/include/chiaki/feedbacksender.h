@@ -45,6 +45,8 @@ typedef struct chiaki_feedback_sender_t
 	ChiakiControllerState controller_state_history_prev;
 	ChiakiControllerState controller_state;
 	bool controller_state_changed;
+	bool analog_update_pending;
+	uint64_t controller_state_changed_us;
 	bool history_dirty;
 	ChiakiMutex state_mutex;
 	ChiakiCond state_cond;

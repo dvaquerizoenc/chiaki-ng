@@ -11,6 +11,11 @@ extern MunitTest tests_http[];
 extern MunitTest tests_rpcrypt[];
 extern MunitTest tests_gkcrypt[];
 extern MunitTest tests_takion[];
+extern MunitTest tests_latency[];
+extern MunitTest tests_mouse_stick[];
+#ifdef CHIAKI_TEST_CONTROLLER_KEYS
+extern MunitTest tests_controller_keys[];
+#endif
 extern MunitTest tests_fec[];
 extern MunitTest tests_regist[];
 #ifndef CHIAKI_LIB_ENABLE_MBEDTLS
@@ -85,6 +90,11 @@ static MunitSuite suites[] = {
 		1,
 		MUNIT_SUITE_OPTION_NONE
 	},
+	{ "/latency", tests_latency, NULL, 1, MUNIT_SUITE_OPTION_NONE },
+	{ "/mouse_stick", tests_mouse_stick, NULL, 1, MUNIT_SUITE_OPTION_NONE },
+#ifdef CHIAKI_TEST_CONTROLLER_KEYS
+	{ "/controller_keys", tests_controller_keys, NULL, 1, MUNIT_SUITE_OPTION_NONE },
+#endif
 	{
 		"/regist",
 		tests_regist,

@@ -6,6 +6,7 @@
 #include <chiaki/random.h>
 #include <chiaki/gkcrypt.h>
 #include <chiaki/time.h>
+#include <chiaki/latency.h>
 
 #include <fcntl.h>
 #include <stdbool.h>
@@ -777,7 +778,9 @@ static ChiakiErrorCode takion_send_feedback_packet(ChiakiTakion *takion, uint8_t
 	if(err != CHIAKI_ERR_SUCCESS)
 		goto beach;
 
-	chiaki_takion_send_raw(takion, buf, buf_size);
+	const uint64_t send_begin_us = chiaki_latency_begin();
+	err = chiaki_takion_send_raw(takion, buf, buf_size);
+	chiaki_latency_end(err == CHIAKI_ERR_SUCCESS ? CHIAKI_LATENCY_udp_send : CHIAKI_LATENCY_udp_send_failed, send_begin_us);
 
 beach:
 	chiaki_mutex_unlock(&takion->gkcrypt_local_mutex);
@@ -832,7 +835,7 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_send_mic_packet(ChiakiTakion *takion
 	if(err != CHIAKI_ERR_SUCCESS)
 		goto beach;
 
-	chiaki_takion_send_raw(takion, buf, buf_size);
+	err = chiaki_takion_send_raw(takion, buf, buf_size);
 beach:
 	chiaki_mutex_unlock(&takion->gkcrypt_local_mutex);
 	return err;
