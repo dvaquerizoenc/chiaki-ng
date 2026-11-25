@@ -39,6 +39,13 @@ add_test(NAME unit COMMAND chiaki-unit)
 
 target_link_libraries(chiaki-unit chiaki-lib munit)
 
+if(CHIAKI_ENABLE_GUI)
+	find_package(Qt6 REQUIRED COMPONENTS Gui)
+	target_sources(chiaki-unit PRIVATE controllerkeys.cpp)
+	target_compile_definitions(chiaki-unit PRIVATE CHIAKI_TEST_CONTROLLER_KEYS=1)
+	target_link_libraries(chiaki-unit Qt::Gui)
+endif()
+
 if(CHIAKI_ENABLE_FFMPEG_DECODER)
 	target_link_libraries(chiaki-unit FFMPEG::avcodec FFMPEG::avutil)
 endif()

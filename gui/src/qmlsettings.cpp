@@ -1,8 +1,8 @@
 #include "qmlsettings.h"
+#include "controllerkeys.h"
 #include "sessionlog.h"
 
 #include <QSet>
-#include <QKeySequence>
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
 #include <QLoggingCategory>
@@ -1832,7 +1832,7 @@ QVariantList QmlSettings::controllerMapping() const
         QVariantMap m;
         m["buttonName"] = Settings::GetChiakiControllerButtonName(it.key());
         m["buttonValue"] = it.key();
-        m["keyName"] = QKeySequence(it.value()).toString();
+        m["keyName"] = controllerKeyName(it.value());
         out.append(m);
     }
     return out;
@@ -1940,10 +1940,12 @@ void QmlSettings::refreshAudioDevices()
 
 QString QmlSettings::changeControllerKey(int button, int key)
 {
-    Qt::Key qt_key = Qt::Key(key);
+    const auto qt_key = controllerKey(key);
+    if (qt_key == Qt::Key_unknown)
+        return {};
     settings->SetControllerButtonMapping(button, qt_key);
     emit controllerMappingChanged(); // Refresh the list, otherwise it still holds the old mapping and "Reset All Keys" may not update it
-    return QKeySequence(qt_key).toString();
+    return controllerKeyName(qt_key);
 }
 
 void QmlSettings::setSettings(Settings *new_settings)

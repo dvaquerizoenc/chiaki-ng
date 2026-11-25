@@ -2,6 +2,7 @@
 
 #include "streamsession.h"
 #include "settings.h"
+#include "controllerkeys.h"
 
 #include <QMutex>
 #include <QAtomicInteger>
@@ -148,6 +149,7 @@ public:
 
     Q_INVOKABLE void grabInput();
     Q_INVOKABLE void releaseInput();
+    Q_INVOKABLE void setControllerKeyCaptureActive(bool active) { controller_key_capture.setActive(active); }
     Q_INVOKABLE void requestOverlayUpdate();
     Q_INVOKABLE void setOverlayInteractionActive(bool active);
     Q_INVOKABLE void setStatsOverlayActive(bool active);
@@ -182,6 +184,7 @@ signals:
     void pendingFrameAgeChanged();
     void loadingTransitionCompleteChanged();
     void statsOverlayActiveChanged();
+    void controllerKeyCaptured(int key);
 
 private:
     friend class BufferedPlaybackPacerThread;
@@ -267,6 +270,7 @@ private:
     bool handleShortcut(QKeyEvent *event);
     void handleMouseStick(QMouseEvent *event);
     void resetMouseStick();
+    ControllerKeyCapture controller_key_capture;
 #ifdef Q_OS_WIN
     bool nativeEvent(const QByteArray &event_type, void *message, qintptr *result) override;
     void updateRawMouseInput();

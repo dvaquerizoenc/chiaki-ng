@@ -2500,7 +2500,6 @@ DialogView {
                                         keyDialog.show({
                                             value: modelData.buttonValue,
                                             mappingIndex: index,
-                                            callback: (name) => text = name,
                                         });
                                     }
                                     Keys.onPressed: (event) => {
@@ -3217,8 +3216,8 @@ DialogView {
             id: keyDialog
             focus: false
             property int buttonValue
-            property var buttonCallback
-            property var keysIndex
+            property int keysIndex
+            property bool capturing: false
             parent: Overlay.overlay
             x: Math.round((root.width - width) / 2)
             y: Math.round((root.height - height) / 2)
@@ -3226,8 +3225,14 @@ DialogView {
             modal: true
             standardButtons: Dialog.Close
             closePolicy: Popup.CloseOnPressOutside
+            onAboutToShow: {
+                capturing = true;
+                Chiaki.window.setControllerKeyCaptureActive(true);
+            }
             onOpened: keyLabel.forceActiveFocus(Qt.TabFocusReason)
             onClosed: {
+                capturing = false;
+                Chiaki.window.setControllerKeyCaptureActive(false);
                 let item = chiakiKeys.itemAt(keysIndex)
                 if(item)
                 {
@@ -3238,24 +3243,35 @@ DialogView {
                 keyLabel.focus = false;
                 focus = false;
             }
+            Component.onDestruction: {
+                if (capturing && Chiaki.window)
+                    Chiaki.window.setControllerKeyCaptureActive(false);
+            }
             Material.roundedScale: Material.MediumScale
 
             function show(opts) {
                 buttonValue = opts.value;
-                buttonCallback = opts.callback;
                 keysIndex = opts.mappingIndex;
                 open();
+            }
+
+            Connections {
+                target: Chiaki.window
+                enabled: keyDialog.capturing
+                function onControllerKeyCaptured(key) {
+                    Chiaki.settings.changeControllerKey(keyDialog.buttonValue, key);
+                    keyDialog.close();
+                }
             }
 
             Label {
                 id: keyLabel
                 focus: true
-                text: qsTr("Press any key to configure button or click close")
-                Keys.onReleased: (event) => {
-                    var name = Chiaki.settings.changeControllerKey(keyDialog.buttonValue, event.key);
-                    keyDialog.buttonCallback(name);
-                    keyDialog.close();
-                }
+                text: qsTr("Press and release a key to assign it, or click Close to cancel.")
+                Keys.priority: Keys.BeforeItem
+                Keys.onShortcutOverride: (event) => event.accepted = true
+                Keys.onPressed: (event) => event.accepted = true
+                Keys.onReleased: (event) => event.accepted = true
             }
         }
 

@@ -3,6 +3,7 @@
 #include <streamsession.h>
 #include <settings.h>
 #include <controllermanager.h>
+#include "controllerkeys.h"
 
 #include <chiaki/base64.h>
 #include <chiaki/latency.h>
@@ -1059,13 +1060,10 @@ void StreamSession::HandleKeyboardEvent(QKeyEvent *event)
 {
 	if(!keyboard_controller_enabled)
 		return;
-	if(key_map.contains(Qt::Key(event->key())) == false)
+	const int button = controllerButtonForKeyEvent(*event, key_map);
+	if(!button)
 		return;
 
-	if(event->isAutoRepeat())
-		return;
-
-	int button = key_map[Qt::Key(event->key())];
 	bool press_event = event->type() == QEvent::Type::KeyPress;
 
 	switch(button)

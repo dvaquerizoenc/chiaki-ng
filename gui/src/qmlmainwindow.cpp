@@ -7991,22 +7991,38 @@ bool QmlMainWindow::event(QEvent *event)
         }
         break;
     }
+    case QEvent::ShortcutOverride:
     case QEvent::KeyPress:
-        if (handleShortcut(static_cast<QKeyEvent*>(event)))
+    case QEvent::KeyRelease: {
+        auto *key = static_cast<QKeyEvent *>(event);
+        const auto target = controllerKeyTarget(event->type(), controller_key_capture.isActive(),
+                                                session && !grab_input, event->spontaneous());
+        if (target == ControllerKeyTarget::Capture) {
+            event->accept();
+            if (event->spontaneous()) {
+                const auto captured = controller_key_capture.consume(*key);
+                if (captured != Qt::Key_unknown)
+                    emit controllerKeyCaptured(int(captured));
+            }
             return true;
-    case QEvent::KeyRelease:
-        if (session && !grab_input) {
-            QKeyEvent *e = static_cast<QKeyEvent*>(event);
-            if (!e->spontaneous()) {
-                QGuiApplication::sendEvent(quick_window, event);
+        }
+        if (event->type() == QEvent::ShortcutOverride) {
+            if (target == ControllerKeyTarget::Gameplay) {
+                event->accept();
                 return true;
             }
-            if (e->timestamp())
-                session->HandleKeyboardEvent(e);
+            break;
+        }
+        if (event->type() == QEvent::KeyPress && handleShortcut(key))
+            return true;
+        if (target == ControllerKeyTarget::Gameplay) {
+            session->HandleKeyboardEvent(key);
+            event->accept();
             return true;
         }
         QGuiApplication::sendEvent(quick_window, event);
         break;
+    }
     case QEvent::TouchBegin:
     case QEvent::TouchUpdate:
     case QEvent::TouchEnd:

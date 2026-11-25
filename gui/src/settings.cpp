@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 
 #include <settings.h>
+#include "controllerkeys.h"
 #include <SDL.h>
 #include <QFile>
 #include <QFileInfo>
 #include <QUrl>
-#include <QKeySequence>
 #include <QCoreApplication>
 
 #include <chiaki/config.h>
@@ -2439,7 +2439,7 @@ QString Settings::GetChiakiControllerButtonName(int button)
 void Settings::SetControllerButtonMapping(int chiaki_button, Qt::Key key)
 {
 	auto button_name = GetChiakiControllerButtonName(chiaki_button).replace(' ', '_').toLower();
-	settings.setValue("keymap/" + button_name, QKeySequence(key).toString());
+	settings.setValue("keymap/" + button_name, writeControllerKey(key));
 }
 
 QMap<int, Qt::Key> Settings::GetControllerMapping()
@@ -2481,7 +2481,7 @@ QMap<int, Qt::Key> Settings::GetControllerMapping()
 	{
 		auto button_name = GetChiakiControllerButtonName(chiaki_button).replace(' ', '_').toLower();
 		if(settings.contains("keymap/" + button_name))
-			result[static_cast<int>(chiaki_button)] = QKeySequence(settings.value("keymap/" + button_name).toString())[0].key();
+			result[static_cast<int>(chiaki_button)] = readControllerKey(settings.value("keymap/" + button_name).toString());
 	}
 
 	const auto mouse = GetMouseStickOptions();
