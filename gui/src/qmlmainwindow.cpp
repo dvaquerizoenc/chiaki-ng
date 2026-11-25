@@ -2,6 +2,7 @@
 #include "qmlbackend.h"
 #include "qmlsvgprovider.h"
 #include "chiaki/log.h"
+#include "chiaki/latency.h"
 #include "chiaki/time.h"
 #include "streamsession.h"
 
@@ -33,6 +34,7 @@ extern "C" {
 #include <QCursor>
 #include <QScreen>
 #include <QFile>
+#include <QFontDatabase>
 #include <QWidget>
 #include <QLabel>
 #include <QVBoxLayout>
@@ -69,6 +71,8 @@ extern "C" {
 #endif
 
 Q_LOGGING_CATEGORY(chiakiGui, "chiaki.gui", QtInfoMsg);
+
+static bool detailedVerboseTelemetryEnabled();
 
 class TimedMutexLocker
 {
@@ -176,23 +180,47 @@ public:
         droppedFramesRow = makeRow(tr("dropped frames"), QColor(QStringLiteral("#ef9a9a")), titleFont, valueFont, droppedFramesValue);
         lostFramesRow = makeRow(tr("lost frames"), QColor(QStringLiteral("#ef9a9a")), titleFont, valueFont, lostFramesValue);
 
+        decoderValue = new QLabel(panel);
+        decoderValue->setTextFormat(Qt::PlainText);
+        panelLayout->addWidget(decoderValue);
+        latencyValue = new QLabel(panel);
+        latencyValue->setTextFormat(Qt::PlainText);
+        QFont fixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        fixed.setPixelSize(12);
+        latencyValue->setFont(fixed);
+        panelLayout->addWidget(latencyValue);
+
+        const QString csvPath = qEnvironmentVariable("CHIAKI_LATENCY_CSV");
+        if (!csvPath.isEmpty()) {
+            csv.setFileName(csvPath);
+            if (!csv.open(QIODevice::WriteOnly | QIODevice::NewOnly) || csv.write("metric,value_ms\n") < 0) {
+                qCWarning(chiakiGui) << "Cannot create latency CSV" << csvPath << csv.errorString();
+                csv.close();
+            }
+        }
+
         outer->addWidget(panel, 0, Qt::AlignRight | Qt::AlignVCenter);
 
-        connect(owner, &QmlMainWindow::queueDepthAverageChanged, this, &StatsOverlayWidget::refresh);
-        connect(owner, &QmlMainWindow::pendingFrameAgeChanged, this, &StatsOverlayWidget::refresh);
-        connect(owner, &QmlMainWindow::droppedFramesChanged, this, &StatsOverlayWidget::refresh);
         if (backend) {
-            connect(backend, &QmlBackend::sessionChanged, this, [this](StreamSession *s) {
-                setSession(s);
-                refresh();
-            });
-            setSession(backend->qmlSession());
+            connect(backend, &QmlBackend::sessionChanged, this, &StatsOverlayWidget::setSession);
+            current_session = backend->qmlSession();
         }
+        timer.setInterval(1000);
+        connect(&timer, &QTimer::timeout, this, &StatsOverlayWidget::publishLatency);
+        updateCollection();
         refresh();
+    }
+
+    ~StatsOverlayWidget() override
+    {
+        chiaki_latency_set_enabled(false);
+        publishLatency();
     }
 
     void setOverlayVisible(bool visible)
     {
+        overlayRequested = visible;
+        updateCollection();
         if (visible) {
             updateTransientParent();
             syncGeometry();
@@ -228,17 +256,128 @@ public:
 
     void setSession(StreamSession *session)
     {
-        if (session == current_session)
+        if (session && session == current_session)
             return;
-        if (current_session)
-            QObject::disconnect(current_session, nullptr, this, nullptr);
+        chiaki_latency_set_enabled(false);
+        publishLatency();
         current_session = session;
-        if (current_session) {
-            connect(current_session, &StreamSession::MeasuredBitrateChanged, this, &StatsOverlayWidget::refresh);
-            connect(current_session, &StreamSession::AveragePacketLossChanged, this, &StatsOverlayWidget::refresh);
-            connect(current_session, &StreamSession::FramesLostChanged, this, &StatsOverlayWidget::refresh);
-            connect(current_session, &StreamSession::ConnectedChanged, this, &StatsOverlayWidget::refresh);
+        latencyValue->clear();
+        decoderValue->clear();
+        updateCollection();
+    }
+
+    void updateCollection()
+    {
+        const bool debug = detailedVerboseTelemetryEnabled() && chiakiGui().isDebugEnabled();
+        const bool collect = current_session && (overlayRequested || csv.isOpen() || debug);
+        chiaki_latency_set_enabled(collect);
+        if (collect && !timer.isActive())
+            timer.start();
+        else if (!collect && timer.isActive()) {
+            timer.stop();
+            publishLatency();
         }
+    }
+
+    void publishLatency()
+    {
+        struct Row { ChiakiLatencyStage stage; const char *label; };
+        const Row rows[] = {
+            {CHIAKI_LATENCY_mouse_input, QT_TR_NOOP("Mouse handler")},
+            {CHIAKI_LATENCY_mouse_to_state, QT_TR_NOOP("Mouse to state")},
+            {CHIAKI_LATENCY_feedback_to_udp, QT_TR_NOOP("State to UDP")},
+            {CHIAKI_LATENCY_udp_send, QT_TR_NOOP("UDP send")},
+            {CHIAKI_LATENCY_decode_send_wait, QT_TR_NOOP("Decoder send lock")},
+            {CHIAKI_LATENCY_decode_send, QT_TR_NOOP("Decoder send")},
+            {CHIAKI_LATENCY_decode_receive_wait, QT_TR_NOOP("Decoder receive lock")},
+            {CHIAKI_LATENCY_decode_receive, QT_TR_NOOP("Decoder receive")},
+            {CHIAKI_LATENCY_ram_transfer, QT_TR_NOOP("RAM transfer")},
+            {CHIAKI_LATENCY_snapshot_ram_transfer, QT_TR_NOOP("Snapshot transfer")},
+            {CHIAKI_LATENCY_frame_age_at_map, QT_TR_NOOP("Decoded to map")},
+            {CHIAKI_LATENCY_map_frame, QT_TR_NOOP("Frame map")},
+            {CHIAKI_LATENCY_render_image, QT_TR_NOOP("Render CPU call")},
+            {CHIAKI_LATENCY_start_frame_block, QT_TR_NOOP("Acquire frame")},
+            {CHIAKI_LATENCY_submit_call, QT_TR_NOOP("Submit call")},
+            {CHIAKI_LATENCY_swap_call, QT_TR_NOOP("Swap return")},
+            {CHIAKI_LATENCY_present_request_to_swap_return, QT_TR_NOOP("Request to swap")},
+        };
+        const bool debug = detailedVerboseTelemetryEnabled() && chiakiGui().isDebugEnabled();
+        uint64_t samples[CHIAKI_LATENCY_BATCH_CAPACITY];
+        size_t counts[CHIAKI_LATENCY_COUNT] = {};
+        ChiakiLatencySummary stats[CHIAKI_LATENCY_COUNT] = {};
+        uint64_t omittedTotal = 0;
+        QByteArray batch;
+        for (int i = 0; i < CHIAKI_LATENCY_COUNT; ++i) {
+            const auto stage = static_cast<ChiakiLatencyStage>(i);
+            const char *name = chiaki_latency_name(stage);
+            uint64_t omitted = 0;
+            const size_t count = chiaki_latency_drain(stage, samples, &omitted);
+            counts[i] = count;
+            omittedTotal += omitted;
+            if (csv.isOpen()) {
+                for (size_t j = 0; j < count; ++j) {
+                    const auto us = static_cast<qulonglong>(samples[j]);
+                    batch += name;
+                    batch += ',';
+                    batch += QByteArray::number(us / 1000);
+                    batch += '.';
+                    batch += QByteArray::number(us % 1000).rightJustified(3, '0');
+                    batch += '\n';
+                }
+            }
+            if (count && (overlayRequested || debug)) {
+                auto &summary = stats[i];
+                summary = chiaki_latency_summarize(samples, count);
+                if (debug)
+                    qCDebug(chiakiGui).nospace() << "[latency] " << name
+                        << " min_us=" << summary.min_us << " max_us=" << summary.max_us
+                        << " avg_us=" << summary.avg_us << " p50_us=" << summary.p50_us
+                        << " p95_us=" << summary.p95_us << " p99_us=" << summary.p99_us
+                        << " samples=" << count << " omitted=" << omitted;
+            }
+        }
+        if (csv.isOpen() && !batch.isEmpty() && (csv.write(batch) != batch.size() || !csv.flush())) {
+            qCWarning(chiakiGui) << "Latency CSV write failed" << csv.errorString();
+            csv.close();
+        }
+        if (!overlayRequested)
+            return;
+
+        QString text = tr("Stage (ms)               P50    P95    P99      n");
+        for (const auto &row : rows) {
+            const auto &summary = stats[row.stage];
+            const auto count = counts[row.stage];
+            if (!count)
+                continue;
+            text += QStringLiteral("\n%1 %2 %3 %4 %5")
+                .arg(tr(row.label), -22)
+                .arg(summary.p50_us / 1000.0, 6, 'f', 2)
+                .arg(summary.p95_us / 1000.0, 6, 'f', 2)
+                .arg(summary.p99_us / 1000.0, 6, 'f', 2)
+                .arg(static_cast<qulonglong>(count), 6);
+        }
+        if (omittedTotal)
+            text += tr("\nOmitted samples: %1").arg(static_cast<qulonglong>(omittedTotal));
+        if (counts[CHIAKI_LATENCY_udp_send_failed])
+            text += tr("\nUDP send errors: %1").arg(static_cast<qulonglong>(counts[CHIAKI_LATENCY_udp_send_failed]));
+        latencyValue->setText(text);
+
+        if (backend && current_session) {
+            const auto *decoder = current_session->GetFfmpegDecoder();
+            const char *codec = decoder && decoder->av_codec ? decoder->av_codec->name : nullptr;
+            const char *device = decoder && decoder->hw_device_ctx
+                ? av_hwdevice_get_type_name(reinterpret_cast<AVHWDeviceContext *>(decoder->hw_device_ctx->data)->type)
+                : nullptr;
+            const char *format = av_get_pix_fmt_name(static_cast<AVPixelFormat>(backend->hardwareFrameFormat()));
+            decoderValue->setText(tr("%1 / %2 · HW %3\nZero-copy %4 · RAM transfers %5")
+                .arg(codec ? QString::fromLatin1(codec) : tr("pending"),
+                     device ? QString::fromLatin1(device) : tr("software"),
+                     format ? QString::fromLatin1(format) : QStringLiteral("—"),
+                     backend->lastHardwareFrameMappedDirectly() ? tr("active") :
+                         (backend->zeroCopy() ? tr("inactive") : tr("disabled")))
+                .arg(static_cast<qulonglong>(counts[CHIAKI_LATENCY_ram_transfer] + counts[CHIAKI_LATENCY_snapshot_ram_transfer])));
+        }
+        refresh();
     }
 
     void refresh()
@@ -277,6 +416,11 @@ public:
     }
 
 private:
+    QTimer timer;
+    QFile csv;
+    bool overlayRequested = false;
+    QLabel *latencyValue = nullptr;
+    QLabel *decoderValue = nullptr;
     QPointer<QmlMainWindow> owner;
     QPointer<QmlBackend> backend;
     QPointer<StreamSession> current_session;
@@ -746,6 +890,8 @@ static void logPresentCompletionStats(qint64 now_us,
                                       RenderBackend render_backend,
                                       bool deferred_present)
 {
+    if (request_us > 0 && complete_us >= request_us)
+        chiaki_latency_record(CHIAKI_LATENCY_present_request_to_swap_return, complete_us - request_us);
     if (!chiakiGui().isDebugEnabled())
         return;
     static QMutex present_completion_stats_mutex;
@@ -1137,71 +1283,11 @@ static bool shouldUseRefreshPacedBuffering(bool stream_active, int schedule_fram
     return stream_active && schedule_frame_mixer_active != 0;
 }
 
-static void logLatencyStats(const char *label, qint64 delta_us)
+static void logLatencyStats(ChiakiLatencyStage stage, qint64 delta_us)
 {
-    if (!chiakiGui().isDebugEnabled())
-        return;
-    if (!label)
-        return;
-
-    static QMutex stats_mutex;
-    QMutexLocker locker(&stats_mutex);
-
-    static qint64 last_log_us_schedule_to_render = 0;
-    static qint64 min_us_schedule_to_render = 0;
-    static qint64 max_us_schedule_to_render = 0;
-    static qint64 sum_us_schedule_to_render = 0;
-    static int samples_schedule_to_render = 0;
-
-    static qint64 last_log_us_render_to_swap = 0;
-    static qint64 min_us_render_to_swap = 0;
-    static qint64 max_us_render_to_swap = 0;
-    static qint64 sum_us_render_to_swap = 0;
-    static int samples_render_to_swap = 0;
-
-    qint64 *last_log_us = nullptr;
-    qint64 *min_us = nullptr;
-    qint64 *max_us = nullptr;
-    qint64 *sum_us = nullptr;
-    int *samples = nullptr;
-
-    if (qstrcmp(label, "schedule_to_render") == 0) {
-        last_log_us = &last_log_us_schedule_to_render;
-        min_us = &min_us_schedule_to_render;
-        max_us = &max_us_schedule_to_render;
-        sum_us = &sum_us_schedule_to_render;
-        samples = &samples_schedule_to_render;
-    } else {
-        last_log_us = &last_log_us_render_to_swap;
-        min_us = &min_us_render_to_swap;
-        max_us = &max_us_render_to_swap;
-        sum_us = &sum_us_render_to_swap;
-        samples = &samples_render_to_swap;
-    }
-
-    const qint64 now_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-    if (*min_us == 0 || delta_us < *min_us)
-        *min_us = delta_us;
-    if (delta_us > *max_us)
-        *max_us = delta_us;
-    *sum_us += delta_us;
-    (*samples)++;
-
-    if (*last_log_us == 0)
-        *last_log_us = now_us;
-    else if (now_us - *last_log_us >= 1000000 && *samples > 0) {
-        CHIAKI_NOISY_DEBUG().nospace()
-            << "[latency] " << label
-            << " min_us=" << *min_us
-            << " max_us=" << *max_us
-            << " avg_us=" << (*sum_us / *samples)
-            << " samples=" << *samples;
-        *last_log_us = now_us;
-        *min_us = 0;
-        *max_us = 0;
-        *sum_us = 0;
-        *samples = 0;
-    }
+    if (delta_us >= 0)
+        chiaki_latency_record(stage, static_cast<uint64_t>(delta_us));
+}
 }
 
 static void logScheduleToUpdateStats(qint64 now_us, qint64 delta_us)
@@ -2201,6 +2287,16 @@ static void placebo_log_cb(void *user, pl_log_level level, const char *msg)
     }
 }
 
+static void recordFrameAgeAtMap(const AVFrame *frame, uint64_t map_us)
+{
+    if (!frame->opaque_ref || frame->opaque_ref->size != sizeof(uint64_t))
+        return;
+    uint64_t ready_us;
+    std::memcpy(&ready_us, frame->opaque_ref->data, sizeof(ready_us));
+    if (ready_us && map_us >= ready_us)
+        chiaki_latency_record(CHIAKI_LATENCY_frame_age_at_map, map_us - ready_us);
+}
+
 static bool map_frame(pl_gpu gpu, pl_tex *tex,
                       const struct pl_source_frame *src,
                       struct pl_frame *out_frame)
@@ -2214,6 +2310,10 @@ static bool map_frame(pl_gpu gpu, pl_tex *tex,
     bool ok = pl_map_avframe_ex(gpu, out_frame, &av_params
     );
     const qint64 map_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
+    if (map_end_us >= map_begin_us)
+        chiaki_latency_record(CHIAKI_LATENCY_map_frame, map_end_us - map_begin_us);
+    if (ok)
+        recordFrameAgeAtMap(frame, map_begin_us);
     if (map_end_us >= map_begin_us && map_end_us - map_begin_us >= 500) {
         CHIAKI_NOISY_DEBUG().nospace()
             << "[latency] pl_map_avframe_ex_us=" << (map_end_us - map_begin_us)
@@ -2303,10 +2403,12 @@ static AVFrame *make_fallback_snapshot_frame(const AVFrame *frame)
     if (!copy)
         return nullptr;
 
+    const auto transfer_begin_us = chiaki_latency_begin();
     if (av_hwframe_transfer_data(copy, frame, 0) < 0) {
         av_frame_free(&copy);
         return av_frame_clone(frame);
     }
+    chiaki_latency_end(CHIAKI_LATENCY_snapshot_ram_transfer, transfer_begin_us);
 
     int sw_format = copy->format;
     int sw_width = copy->width;
@@ -2558,6 +2660,9 @@ QmlMainWindow::QmlMainWindow(const StreamSessionConnectInfo &connect_info)
 QmlMainWindow::~QmlMainWindow()
 {
     Q_ASSERT(!placebo_swapchain);
+#ifdef Q_OS_WIN
+    setRawMouseInput(false);
+#endif
 
     // A normal exit isn't a crash, whether or not Vulkan showed a frame or the queued clear ran
     if (settings && render_backend == RenderBackend::Vulkan) {
@@ -2760,9 +2865,11 @@ void QmlMainWindow::grabInput()
 {
     setCursor(Qt::ArrowCursor);
     grab_input++;
-    resetMouseLeftStick();
-    if (session)
+    mouse_stick_position_valid = false;
+    if (session) {
+        session->ResetMouseInput();
         session->BlockInput(grab_input);
+    }
 }
 
 void QmlMainWindow::releaseInput()
@@ -3011,6 +3118,7 @@ void QmlMainWindow::presentFrame(ChiakiFfmpegFrame frame, int32_t frames_lost, q
     const qint64 present_entry_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
     if (decoder_delivery_us > 0 && present_entry_us >= decoder_delivery_us) {
         const qint64 gui_handoff_us = present_entry_us - decoder_delivery_us;
+        chiaki_latency_record(CHIAKI_LATENCY_gui_handoff, gui_handoff_us);
         if (gui_handoff_us >= 12000) {
             CHIAKI_NOISY_DEBUG().nospace()
                 << "[decode] gui_handoff_outlier_us=" << gui_handoff_us
@@ -5166,6 +5274,9 @@ renderer_backend_ready:
         startup_warmup_preserve_next_session_change = false;
         session = s;
         mouse_stick_position_valid = false;
+#ifdef Q_OS_WIN
+        updateRawMouseInput();
+#endif
         stream_session_active.storeRelease(s ? 1 : 0);
         startup_video_visible_generation.fetchAndAddRelaxed(1);
         grab_input = 0;
@@ -6804,13 +6915,17 @@ void QmlMainWindow::render()
             pl_avframe_params avparams = {};
             avparams.frame = incoming;
             avparams.tex = placebo_tex.data();
+            const auto map_begin_us = chiaki_latency_begin();
             if (!pl_map_avframe_ex(placeboGpu(), &direct_frame, &avparams)) {
                 qCWarning(chiakiGui) << "Failed to map direct video frame";
                 pl_unmap_avframe(placeboGpu(), &direct_frame);
                 direct_frame = {};
                 if (backend && backend->zeroCopy())
                     backend->disableZeroCopy();
+            } else if (map_begin_us) {
+                recordFrameAgeAtMap(incoming, map_begin_us);
             }
+            chiaki_latency_end(CHIAKI_LATENCY_map_frame, map_begin_us);
             av_frame_free(&incoming);
         }
         direct_render_frame = direct_frame;
@@ -7712,6 +7827,70 @@ void QmlMainWindow::resetMouseLeftStick()
         session->ResetMouseLeftStick();
 }
 
+#ifdef Q_OS_WIN
+void QmlMainWindow::updateRawMouseInput()
+{
+    static const bool enabled = qEnvironmentVariable("CHIAKI_MOUSE_RAW_INPUT") != QStringLiteral("0");
+    setRawMouseInput(enabled && session && session->UsesEventMouseInput() && session->UsesMouseLeftStick(Qt::NoButton));
+}
+
+void QmlMainWindow::setRawMouseInput(bool enabled)
+{
+    if (enabled == raw_mouse_registered)
+        return;
+    // Leave legacy button and touchpad input enabled. Receive movement only in the foreground.
+    RAWINPUTDEVICE device{0x01, 0x02, enabled ? DWORD{0} : DWORD{RIDEV_REMOVE},
+                          enabled ? reinterpret_cast<HWND>(winId()) : nullptr};
+    if (RegisterRawInputDevices(&device, 1, sizeof(device))) {
+        raw_mouse_registered = enabled;
+        raw_mouse_uses_legacy = false;
+    } else {
+        qCWarning(chiakiGui) << "Could not change Windows Raw Input registration" << GetLastError();
+    }
+}
+
+bool QmlMainWindow::nativeEvent(const QByteArray &event_type, void *message, qintptr *result)
+{
+    const auto *msg = static_cast<const MSG *>(message);
+    if (event_type != "windows_generic_MSG" || !raw_mouse_registered || msg->message != WM_INPUT)
+        return QWindow::nativeEvent(event_type, message, result);
+
+    const auto begin_us = chiaki_latency_begin();
+    RAWINPUT input{};
+    UINT size = sizeof(input);
+    const UINT read = GetRawInputData(reinterpret_cast<HRAWINPUT>(msg->lParam), RID_INPUT, &input,
+                                      &size, sizeof(RAWINPUTHEADER));
+    if (read == UINT(-1)) {
+        raw_mouse_uses_legacy = true;
+    } else if (input.header.dwType == RIM_TYPEMOUSE) {
+        raw_mouse_uses_legacy = (input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0;
+        if (!raw_mouse_uses_legacy && session && has_video && !grab_input && isActive() &&
+            (input.data.mouse.lLastX || input.data.mouse.lLastY) &&
+            QRect(mapToGlobal(QPoint()), this->size()).contains(QCursor::pos())) {
+            Qt::MouseButtons buttons;
+            if (GetKeyState(VK_LBUTTON) < 0)
+                buttons |= Qt::LeftButton;
+            if (GetKeyState(VK_RBUTTON) < 0)
+                buttons |= Qt::RightButton;
+            if (GetKeyState(VK_MBUTTON) < 0)
+                buttons |= Qt::MiddleButton;
+            if (GetKeyState(VK_XBUTTON1) < 0)
+                buttons |= Qt::BackButton;
+            if (GetKeyState(VK_XBUTTON2) < 0)
+                buttons |= Qt::ForwardButton;
+            if (session->UsesMouseLeftStick(buttons)) {
+                session->HandleMouseLeftStickMovement(QPointF(input.data.mouse.lLastX, input.data.mouse.lLastY));
+                chiaki_latency_end(CHIAKI_LATENCY_mouse_input, begin_us);
+            }
+        }
+    }
+    const auto native_result = DefWindowProcW(msg->hwnd, msg->message, msg->wParam, msg->lParam);
+    if (result)
+        *result = native_result;
+    return true;
+}
+#endif
+
 void QmlMainWindow::handleMouseLeftStick(QMouseEvent *event)
 {
     const QPointF position = event->globalPosition();
@@ -7722,7 +7901,11 @@ void QmlMainWindow::handleMouseLeftStick(QMouseEvent *event)
         return;
     }
 
-    if (mouse_stick_position_valid)
+    if (mouse_stick_position_valid
+#ifdef Q_OS_WIN
+        && (!raw_mouse_registered || raw_mouse_uses_legacy)
+#endif
+    )
         session->HandleMouseLeftStickMovement(position - mouse_stick_position);
     mouse_stick_position = position;
     mouse_stick_position_valid = true;
@@ -7746,9 +7929,23 @@ void QmlMainWindow::handleMouseLeftStick(QMouseEvent *event)
 bool QmlMainWindow::event(QEvent *event)
 {
     switch (event->type()) {
+#ifdef Q_OS_WIN
+    case QEvent::FocusIn:
+        updateRawMouseInput();
+        break;
+    case QEvent::PlatformSurface:
+        if (static_cast<QPlatformSurfaceEvent *>(event)->surfaceEventType() == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
+            setRawMouseInput(false);
+        break;
+#endif
     case QEvent::FocusOut:
-    case QEvent::Leave:
+    case QEvent::WindowDeactivate:
     case QEvent::Hide:
+        mouse_stick_position_valid = false;
+        if (session)
+            session->ResetMouseInput();
+        break;
+    case QEvent::Leave:
         resetMouseLeftStick();
         break;
     case QEvent::MouseMove:
@@ -7758,8 +7955,9 @@ bool QmlMainWindow::event(QEvent *event)
         if (mouse_event->source() != Qt::MouseEventNotSynthesized)
             return true;
         if (session && !grab_input) {
+            const auto begin_us = chiaki_latency_begin();
             const bool use_mouse_stick = has_video && isActive() && session->UsesMouseLeftStick(mouse_event->buttons());
-            if (!use_mouse_stick && mouse_stick_position_valid)
+            if (!use_mouse_stick)
                 resetMouseLeftStick();
             if (event->type() == QEvent::MouseMove) {
                 if (use_mouse_stick)
@@ -7771,6 +7969,10 @@ bool QmlMainWindow::event(QEvent *event)
             } else {
                 session->HandleMouseReleaseEvent(mouse_event);
             }
+#ifdef Q_OS_WIN
+            if (!use_mouse_stick || !raw_mouse_registered || raw_mouse_uses_legacy || event->type() != QEvent::MouseMove)
+#endif
+                chiaki_latency_end(CHIAKI_LATENCY_mouse_input, begin_us);
             return true;
         }
         QGuiApplication::sendEvent(quick_window, event);

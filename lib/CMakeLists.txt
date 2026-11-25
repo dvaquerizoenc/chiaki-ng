@@ -10,6 +10,7 @@ set(HEADER_FILES
 		include/chiaki/ctrl.h
 		include/chiaki/rpcrypt.h
 		include/chiaki/takion.h
+		include/chiaki/latency.h
 		include/chiaki/senkusha.h
 		include/chiaki/streamconnection.h
 		include/chiaki/ecdh.h
@@ -55,6 +56,7 @@ set(SOURCE_FILES
 		src/ctrl.c
 		src/rpcrypt.c
 		src/takion.c
+		src/latency.cpp
 		src/senkusha.c
 		src/utils.h
 		src/pb_utils.h

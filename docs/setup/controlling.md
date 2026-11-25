@@ -6,6 +6,10 @@ In the desktop app, open **Settings → Keys** and enable **Mouse as left stick 
 
 With **Enable Mouse Touchpad** turned on, dragging with the left mouse button controls the touchpad. On native Wayland the pointer stays where you move it, so reverse direction to bring it away from a screen edge.
 
+On Windows, launch with `CHIAKI_MOUSE_EVENT_INPUT=1` to try applying mouse movement to the left stick as events arrive. This uses Raw Input when available. Set `CHIAKI_MOUSE_RAW_INPUT=0` to compare immediate Qt mouse events, or unset `CHIAKI_MOUSE_EVENT_INPUT` to return to the 16 ms sampling mode. Raw Input uses device counts, so pointer acceleration and DPI scaling can make the same physical motion feel different.
+
+During a stream, **Show stream stats** displays local latency percentiles and sample counts once a second. Set `CHIAKI_LATENCY_CSV` to a new file path before launching to export individual samples as `metric,value_ms`. Use a separate file per run. Frame age starts at decoded output and ends at frame mapping. Swap timings end when the application returns from the presentation call. Measure presentation on screen separately.
+
 ## Configuring Steam Deck Controller Profile
 
 !!! Tip

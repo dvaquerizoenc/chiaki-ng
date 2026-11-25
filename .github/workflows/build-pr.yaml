@@ -92,7 +92,8 @@ jobs:
 
       - name: Build chiaki-ng
         run: |
-          cmake --build build --config Release --clean-first --target chiaki
+          cmake --build build --config Release --clean-first --target chiaki chiaki-unit
+          ctest --test-dir build -C Release --output-on-failure
           
       - name: Deploy chiaki-ng
         run: |

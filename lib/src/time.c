@@ -17,9 +17,8 @@ CHIAKI_EXPORT uint64_t chiaki_time_now_monotonic_us()
 	LARGE_INTEGER v;
 	if(!QueryPerformanceCounter(&v))
 		return 0;
-	v.QuadPart *= 1000000;
-	v.QuadPart /= f.QuadPart;
-	return v.QuadPart;
+	return (v.QuadPart / f.QuadPart) * 1000000 +
+		(v.QuadPart % f.QuadPart) * 1000000 / f.QuadPart;
 #else
 	struct timespec time;
 	clock_gettime(CLOCK_MONOTONIC, &time);

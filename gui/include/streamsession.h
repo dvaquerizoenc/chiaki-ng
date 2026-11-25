@@ -226,6 +226,10 @@ class StreamSession : public QObject
 		QPointF mouse_stick_delta;
 		QPoint mouse_stick_axes;
 		bool mouse_stick_sample_pending = false;
+		bool event_mouse_input = false;
+		bool mouse_touch_clicked = false;
+		uint64_t mouse_last_event_us = 0;
+		uint64_t mouse_sample_begin_us = 0;
 		ChiakiControllerState touch_state;
 		QMap<int, uint8_t> touch_tracker;
 		int8_t mouse_touch_id;
@@ -379,8 +383,10 @@ class StreamSession : public QObject
 		void HandleMousePressEvent(QMouseEvent *event);
 		void HandleMouseMoveEvent(QMouseEvent *event, qreal width, qreal height);
 		bool UsesMouseLeftStick(Qt::MouseButtons buttons) const;
+		bool UsesEventMouseInput() const { return event_mouse_input; }
 		void HandleMouseLeftStickMovement(const QPointF &delta);
 		void ResetMouseLeftStick();
+		void ResetMouseInput();
 #if CHIAKI_GUI_ENABLE_SPEEX
 		bool ProcessMicFrame(int16_t *echo_buf);
 #endif
@@ -415,6 +421,7 @@ class StreamSession : public QObject
 		void DpadSendFeedbackState();
 		void SendFeedbackState();
 		void UpdateMouseLeftStick();
+		void ApplyMouseLeftStick(const QPointF &delta, uint64_t begin_us);
 		ChiakiControllerState GetKeyboardMouseState() const;
 };
 

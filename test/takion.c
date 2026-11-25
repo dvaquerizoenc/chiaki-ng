@@ -326,7 +326,37 @@ static MunitResult test_takion_send_after_receive_error(const MunitParameter par
 #endif
 }
 
+static MunitResult test_feedback_send_reports_socket_failure(const MunitParameter params[], void *user)
+{
+	const uint8_t handshake_key[16] = {0};
+	const uint8_t ecdh_secret[32] = {0};
+	ChiakiGKCrypt crypt;
+	ChiakiTakion takion = {0};
+	takion.sock = CHIAKI_INVALID_SOCKET;
+	takion.version = 12;
+	takion.log = get_test_log();
+	takion.gkcrypt_local = &crypt;
+
+	munit_assert_int(chiaki_gkcrypt_init(&crypt, takion.log, 0, 2, handshake_key, ecdh_secret), ==, CHIAKI_ERR_SUCCESS);
+	munit_assert_int(chiaki_mutex_init(&takion.gkcrypt_local_mutex, true), ==, CHIAKI_ERR_SUCCESS);
+	ChiakiFeedbackState state = {0};
+	uint8_t history[] = {0};
+	uint8_t mic[20] = {0};
+	const ChiakiErrorCode state_err = chiaki_takion_send_feedback_state(&takion, 0, &state);
+	const ChiakiErrorCode history_err = chiaki_takion_send_feedback_history(&takion, 0, 1, history, sizeof(history));
+	const ChiakiErrorCode mic_err = chiaki_takion_send_mic_packet(&takion, mic, sizeof(mic), false);
+	chiaki_mutex_fini(&takion.gkcrypt_local_mutex);
+	chiaki_gkcrypt_fini(&crypt);
+
+	munit_assert_int(state_err, ==, CHIAKI_ERR_NETWORK);
+	munit_assert_int(history_err, ==, CHIAKI_ERR_NETWORK);
+	munit_assert_int(mic_err, ==, CHIAKI_ERR_NETWORK);
+	return MUNIT_OK;
+}
+
 MunitTest tests_takion[] = {
+	{ "/feedback_send_reports_socket_failure", test_feedback_send_reports_socket_failure,
+		NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 	{
 		"/av_packet_parse",
 		test_av_packet_parse,

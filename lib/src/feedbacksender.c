@@ -2,6 +2,7 @@
 
 #include <chiaki/feedbacksender.h>
 #include <chiaki/time.h>
+#include <chiaki/latency.h>
 
 #include <string.h>
 
@@ -28,7 +29,7 @@ static const uint64_t feedback_history_tail_ms[] = { 20, 50, 100, 200 };
 #define FEEDBACK_HISTORY_TAIL_COUNT (sizeof(feedback_history_tail_ms) / sizeof(feedback_history_tail_ms[0]))
 
 static void *feedback_sender_thread_func(void *user);
-static void feedback_sender_send_state(ChiakiFeedbackSender *feedback_sender, const ChiakiControllerState *state);
+static void feedback_sender_send_state(ChiakiFeedbackSender *feedback_sender, const ChiakiControllerState *state, uint64_t change_us);
 static void feedback_sender_send_history_packet(ChiakiFeedbackSender *feedback_sender, ChiakiSeqNum16 seq_num, uint8_t event_count, const uint8_t *buf, size_t buf_size);
 static void feedback_sender_flush_history_locked(ChiakiFeedbackSender *feedback_sender);
 static void feedback_sender_record_history(ChiakiFeedbackSender *feedback_sender, const ChiakiControllerState *state_prev, const ChiakiControllerState *state_now);
@@ -111,6 +112,7 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_feedback_sender_set_controller_state(Chiaki
 	feedback_sender_record_history(feedback_sender, &feedback_sender->controller_state_history_prev, &feedback_sender->controller_state);
 	feedback_sender->controller_state_history_prev = feedback_sender->controller_state;
 	feedback_sender->controller_state_changed = true;
+	feedback_sender->controller_state_changed_us = chiaki_latency_begin();
 
 	chiaki_mutex_unlock(&feedback_sender->state_mutex);
 	chiaki_cond_signal(&feedback_sender->state_cond);
@@ -140,7 +142,7 @@ static bool controller_state_equals_for_feedback_state(ChiakiControllerState *a,
 	return true;
 }
 
-static void feedback_sender_send_state(ChiakiFeedbackSender *feedback_sender, const ChiakiControllerState *state)
+static void feedback_sender_send_state(ChiakiFeedbackSender *feedback_sender, const ChiakiControllerState *state, uint64_t change_us)
 {
 	ChiakiFeedbackState feedback_state;
 	feedback_state.left_x = state->left_x;
@@ -160,6 +162,8 @@ static void feedback_sender_send_state(ChiakiFeedbackSender *feedback_sender, co
 	feedback_state.orient_w = state->orient_w;
 
 	ChiakiErrorCode err = chiaki_takion_send_feedback_state(feedback_sender->takion, feedback_sender->state_seq_num++, &feedback_state);
+	if(err == CHIAKI_ERR_SUCCESS)
+		chiaki_latency_end(CHIAKI_LATENCY_feedback_to_udp, change_us);
 	if(err != CHIAKI_ERR_SUCCESS)
 		CHIAKI_LOGE(feedback_sender->log, "FeedbackSender failed to send Feedback State");
 }
@@ -283,6 +287,7 @@ static void *feedback_sender_thread_func(void *user)
 		uint64_t now_ms = chiaki_time_now_monotonic_ms();
 		bool send_feedback_state = now_ms - last_feedback_state_ms >= FEEDBACK_STATE_TIMEOUT_MAX_MS;
 		ChiakiControllerState state_now = feedback_sender->controller_state;
+		uint64_t change_us = 0;
 		bool send_feedback_history = false;
 		uint8_t history_buf[CHIAKI_FEEDBACK_HISTORY_PACKET_BUF_SIZE];
 		size_t history_buf_size = 0;
@@ -293,6 +298,7 @@ static void *feedback_sender_thread_func(void *user)
 		{
 			// TODO: FEEDBACK_STATE_TIMEOUT_MIN_MS
 			feedback_sender->controller_state_changed = false;
+			change_us = feedback_sender->controller_state_changed_us;
 			send_feedback_state = true;
 
 			// don't need to send feedback state if nothing relevant changed
@@ -334,7 +340,7 @@ static void *feedback_sender_thread_func(void *user)
 		chiaki_mutex_unlock(&feedback_sender->state_mutex);
 
 		if(send_feedback_state)
-			feedback_sender_send_state(feedback_sender, &state_now);
+			feedback_sender_send_state(feedback_sender, &state_now, change_us);
 
 		if(send_feedback_history)
 			feedback_sender_send_history_packet(feedback_sender, history_packet_seq_num, history_event_count, history_buf, history_buf_size);

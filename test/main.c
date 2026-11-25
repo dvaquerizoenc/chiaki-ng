@@ -11,6 +11,7 @@ extern MunitTest tests_http[];
 extern MunitTest tests_rpcrypt[];
 extern MunitTest tests_gkcrypt[];
 extern MunitTest tests_takion[];
+extern MunitTest tests_latency[];
 extern MunitTest tests_fec[];
 extern MunitTest tests_regist[];
 #ifndef CHIAKI_LIB_ENABLE_MBEDTLS
@@ -85,6 +86,7 @@ static MunitSuite suites[] = {
 		1,
 		MUNIT_SUITE_OPTION_NONE
 	},
+	{ "/latency", tests_latency, NULL, 1, MUNIT_SUITE_OPTION_NONE },
 	{
 		"/regist",
 		tests_regist,

@@ -1,6 +1,7 @@
 
 #include <chiaki/ffmpegdecoder.h>
 #include <chiaki/time.h>
+#include <chiaki/latency.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/pixdesc.h>
 #include <math.h>
@@ -136,8 +137,16 @@ CHIAKI_EXPORT void chiaki_ffmpeg_decoder_fini(ChiakiFfmpegDecoder *decoder)
 CHIAKI_EXPORT bool chiaki_ffmpeg_decoder_video_sample_cb(uint8_t *buf, size_t buf_size, int32_t frames_lost, bool frame_recovered, void *user)
 {
 	ChiakiFfmpegDecoder *decoder = user;
+	AVPacket *packet = av_packet_alloc();
+	if(!packet)
+	{
+		CHIAKI_LOGE(decoder->log, "Failed to alloc AVPacket");
+		return false;
+	}
 
+	const uint64_t wait_begin_us = chiaki_latency_begin();
 	chiaki_mutex_lock(&decoder->mutex);
+	chiaki_latency_end(CHIAKI_LATENCY_decode_send_wait, wait_begin_us);
 	decoder->frames_lost += frames_lost;
 	decoder->frame_recovered = frame_recovered;
 	if(decoder->synthetic_last_sample_time_us)
@@ -187,7 +196,6 @@ CHIAKI_EXPORT bool chiaki_ffmpeg_decoder_video_sample_cb(uint8_t *buf, size_t bu
 	if(frames_lost > 0)
 		decoder->synthetic_packet_pts += synthetic_duration_pts * (int64_t)frames_lost;
 
-	AVPacket *packet = av_packet_alloc();
 	packet->data = buf;
 	packet->size = buf_size;
 	packet->pts = decoder->synthetic_packet_pts;
@@ -198,8 +206,11 @@ CHIAKI_EXPORT bool chiaki_ffmpeg_decoder_video_sample_cb(uint8_t *buf, size_t bu
 #endif
 	decoder->synthetic_packet_pts += synthetic_duration_pts;
 	int r;
+	uint64_t decode_begin_us;
 send_packet:
+	decode_begin_us = chiaki_latency_begin();
 	r = avcodec_send_packet(decoder->codec_context, packet);
+	chiaki_latency_end(CHIAKI_LATENCY_decode_send, decode_begin_us);
 	if(r != 0)
 	{
 		if(r == AVERROR(EAGAIN))
@@ -211,7 +222,9 @@ send_packet:
 				CHIAKI_LOGE(decoder->log, "Failed to alloc AVFrame");
 				goto hell;
 			}
+			decode_begin_us = chiaki_latency_begin();
 			r = avcodec_receive_frame(decoder->codec_context, frame);
+			chiaki_latency_end(CHIAKI_LATENCY_decode_receive, decode_begin_us);
 			av_frame_free(&frame);
 			if(r != 0)
 			{
@@ -241,7 +254,9 @@ hell:
 
 CHIAKI_EXPORT ChiakiFfmpegFrame chiaki_ffmpeg_decoder_pull_frame(ChiakiFfmpegDecoder *decoder, int32_t *frames_lost)
 {
+	const uint64_t wait_begin_us = chiaki_latency_begin();
 	chiaki_mutex_lock(&decoder->mutex);
+	chiaki_latency_end(CHIAKI_LATENCY_decode_receive_wait, wait_begin_us);
 	double synthetic_duration = decoder->synthetic_frame_duration_us / 1000000.0;
 	// always try to pull as much as possible and return only the very last frame
 	AVFrame *frame_last = NULL;
@@ -262,7 +277,9 @@ CHIAKI_EXPORT ChiakiFfmpegFrame chiaki_ffmpeg_decoder_pull_frame(ChiakiFfmpegDec
 		}
 		frame_last = frame;
 		frame = next_frame;
+		const uint64_t decode_begin_us = chiaki_latency_begin();
 		int r = avcodec_receive_frame(decoder->codec_context, frame);
+		chiaki_latency_end(CHIAKI_LATENCY_decode_receive, decode_begin_us);
 		if(r)
 		{
 			if(r != AVERROR(EAGAIN))

@@ -267,6 +267,13 @@ private:
     bool handleShortcut(QKeyEvent *event);
     void handleMouseLeftStick(QMouseEvent *event);
     void resetMouseLeftStick();
+#ifdef Q_OS_WIN
+    bool nativeEvent(const QByteArray &event_type, void *message, qintptr *result) override;
+    void updateRawMouseInput();
+    void setRawMouseInput(bool enabled);
+    bool raw_mouse_registered = false;
+    bool raw_mouse_uses_legacy = false;
+#endif
     bool event(QEvent *event) override;
     QObject *focusObject() const override;
     void updateQueueDepthAverage(int depth);
