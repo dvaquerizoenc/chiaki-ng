@@ -7785,6 +7785,8 @@ bool QmlMainWindow::handleShortcut(QKeyEvent *event)
 
     switch (event->key()) {
     case Qt::Key_S:
+        if (session && !grab_input && session->UsesWasdControls())
+            return false;
         if (has_video)
             setVideoMode(videoMode() == VideoMode::Stretch ? VideoMode::Normal : VideoMode::Stretch);
         return true;

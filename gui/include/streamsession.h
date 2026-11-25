@@ -385,6 +385,7 @@ class StreamSession : public QObject
 		void HandleMouseMoveEvent(QMouseEvent *event, qreal width, qreal height);
 		bool UsesMouseStick(Qt::MouseButtons buttons) const;
 		bool HasMouseButtonMapping(Qt::MouseButton button) const;
+		bool UsesWasdControls() const { return keyboard_controller_enabled && mouse_options.mode == MouseStickMode::Right && mouse_options.wasd; }
 		bool UsesRawMouseInput() const { return mouse_options.rawInput; }
 		void HandleMouseStickMovement(const QPointF &delta);
 		void ResetMouseStick();

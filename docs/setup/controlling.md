@@ -2,7 +2,7 @@
 
 ## Using a Keyboard and Mouse
 
-In the desktop app, open **Settings → Keys → Mouse controls** and choose **Right stick (camera)** for a PC-style layout. With **Keyboard as controller** and **WASD for left stick** enabled, WASD takes precedence over custom bindings for those keys. Left click sends R2 and right click sends L2 by default. L2 selects the separate horizontal and vertical aim sensitivities. The five mouse buttons can each be assigned a controller action.
+In the desktop app, open **Settings → Keys → Mouse controls** and choose **Right stick (camera)** for a PC-style layout. With **Keyboard as controller** and **WASD for left stick** enabled, WASD takes precedence over custom bindings for those keys and Ctrl+S keeps moving backward during play. Left click sends R2 and right click sends L2 by default. L2 selects the separate horizontal and vertical aim sensitivities. The five mouse buttons can each be assigned a controller action.
 
 Choose **Left stick** for mouse-driven movement or **Disabled** to leave both sticks to the keyboard or gamepad. With **Enable Mouse Touchpad** on, an unassigned left button can still drag the touchpad. On native Wayland the pointer stays where you move it.
 
