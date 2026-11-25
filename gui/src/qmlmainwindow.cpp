@@ -1288,7 +1288,6 @@ static void logLatencyStats(ChiakiLatencyStage stage, qint64 delta_us)
     if (delta_us >= 0)
         chiaki_latency_record(stage, static_cast<uint64_t>(delta_us));
 }
-}
 
 static void logScheduleToUpdateStats(qint64 now_us, qint64 delta_us)
 {
@@ -3345,7 +3344,7 @@ void QmlMainWindow::presentFrame(ChiakiFfmpegFrame frame, int32_t frames_lost, q
             const qint64 push_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
             pl_queue_push(placebo_queue, &src_frame);
             const qint64 push_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-            logLatencyStats("pl_queue_push", push_end_us - push_begin_us);
+            logLatencyStats(CHIAKI_LATENCY_pl_queue_push, push_end_us - push_begin_us);
             CHIAKI_NOISY_DEBUG().nospace()
                 << "[latency] pl_queue_push_us=" << (push_end_us - push_begin_us)
                 << " queue_depth=" << pl_queue_num_frames(placebo_queue);
@@ -3419,7 +3418,7 @@ void QmlMainWindow::presentFrame(ChiakiFfmpegFrame frame, int32_t frames_lost, q
                     pl_queue_push(placebo_queue, &promoted_src_frame);
                     const qint64 push_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
                     queue_depth_cached.storeRelease(pl_queue_num_frames(placebo_queue));
-                    logLatencyStats("pl_queue_push", push_end_us - push_begin_us);
+                    logLatencyStats(CHIAKI_LATENCY_pl_queue_push, push_end_us - push_begin_us);
                     CHIAKI_NOISY_DEBUG().nospace()
                         << "[latency] pl_queue_push_promoted_us=" << (push_end_us - push_begin_us)
                         << " queue_depth=" << pl_queue_num_frames(placebo_queue);
@@ -4330,7 +4329,7 @@ bool QmlMainWindow::enqueueKeptFrame(double queue_pts_origin_hint, bool deinterl
         const qint64 push_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
         pl_queue_push(placebo_queue, &snapshot_src);
         const qint64 push_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-        logLatencyStats("pl_queue_push", push_end_us - push_begin_us);
+        logLatencyStats(CHIAKI_LATENCY_pl_queue_push, push_end_us - push_begin_us);
         CHIAKI_NOISY_DEBUG().nospace()
             << "[latency] pl_queue_push_snapshot_us=" << (push_end_us - push_begin_us)
             << " queue_depth=" << pl_queue_num_frames(placebo_queue);
@@ -4426,7 +4425,7 @@ bool QmlMainWindow::queueStoredFrame(AVFrame *frame, double pts, float duration,
             const qint64 push_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
             pl_queue_push(placebo_queue, &src_frame);
             const qint64 push_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-            logLatencyStats("pl_queue_push", push_end_us - push_begin_us);
+            logLatencyStats(CHIAKI_LATENCY_pl_queue_push, push_end_us - push_begin_us);
             CHIAKI_NOISY_DEBUG().nospace()
                 << "[latency] pl_queue_push_stored_us=" << (push_end_us - push_begin_us)
                 << " queue_depth=" << pl_queue_num_frames(placebo_queue);
@@ -4628,7 +4627,7 @@ void QmlMainWindow::applyPendingFrame()
     pending_frame_submission_active.storeRelease(0);
     if (pending_still_present)
         queuePendingFrameRelease();
-    logLatencyStats("pending_apply_queueStoredFrame", queue_stored_end_us - queue_stored_begin_us);
+    logLatencyStats(CHIAKI_LATENCY_pending_apply_queueStoredFrame, queue_stored_end_us - queue_stored_begin_us);
     CHIAKI_NOISY_DEBUG().nospace()
         << "[latency] pending_apply_queueStoredFrame_us=" << (queue_stored_end_us - queue_stored_begin_us)
         << " pending_pts=" << pending_entry.pts
@@ -4670,7 +4669,7 @@ bool QmlMainWindow::applyPendingFrameIfQueueHasCapacity()
         const qint64 apply_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
         applyPendingFrame();
         const qint64 apply_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-        logLatencyStats("pending_apply", apply_end_us - apply_begin_us);
+        logLatencyStats(CHIAKI_LATENCY_pending_apply, apply_end_us - apply_begin_us);
         CHIAKI_NOISY_DEBUG().nospace()
             << "[latency] pending_apply_us=" << (apply_end_us - apply_begin_us)
             << " queue_depth=" << queue_depth
@@ -5851,7 +5850,7 @@ void QmlMainWindow::processDeferredSwapTask(qint64 submit_begin_us,
 
     const qint64 submit_begin_local_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
     if (submit_begin_local_us >= submit_begin_us)
-        logLatencyStats("submit_queue_delay", submit_begin_local_us - submit_begin_us);
+        logLatencyStats(CHIAKI_LATENCY_submit_queue_delay, submit_begin_local_us - submit_begin_us);
 
     if (present_submit_interval_us > 0) {
         const bool backpressure_active = queue_depth_at_submit >= qMax(2, depth_limit - 1) || pending_frame_waiting;
@@ -5863,7 +5862,7 @@ void QmlMainWindow::processDeferredSwapTask(qint64 submit_begin_us,
         throttleFramePresentation(paced_interval_s);
         const qint64 pace_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
         if (pace_end_us >= pace_begin_us)
-            logLatencyStats("submit_pacing_wait", pace_end_us - pace_begin_us);
+            logLatencyStats(CHIAKI_LATENCY_submit_pacing_wait, pace_end_us - pace_begin_us);
     }
 
     const qint64 submit_call_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
@@ -5874,15 +5873,15 @@ void QmlMainWindow::processDeferredSwapTask(qint64 submit_begin_us,
         else {
             confirmVulkanStartup();
             const qint64 submit_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-            logLatencyStats("pl_swapchain_submit_frame", submit_us - submit_call_begin_us);
+            logLatencyStats(CHIAKI_LATENCY_pl_swapchain_submit_frame, submit_us - submit_call_begin_us);
             CHIAKI_NOISY_DEBUG().nospace()
                 << "[latency] pl_swapchain_submit_frame_us=" << (submit_us - submit_call_begin_us)
                 << " queue_depth=" << pl_queue_num_frames(placebo_queue)
                 << " deferred=1";
             if (submit_us >= submit_call_begin_us) {
                 const qint64 submit_call_us = submit_us - submit_call_begin_us;
-                logLatencyStats("submit_call", submit_call_us);
-                logLatencyStats("submit_frame_block", submit_call_us);
+                logLatencyStats(CHIAKI_LATENCY_submit_call, submit_call_us);
+                logLatencyStats(CHIAKI_LATENCY_submit_frame_block, submit_call_us);
                 const auto submit_render_state = snapshot_render_schedule_state();
                 logPresentOutlier("submit_call",
                                   submit_us,
@@ -5910,7 +5909,7 @@ void QmlMainWindow::processDeferredSwapTask(qint64 submit_begin_us,
 
             const qint64 present_swap_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
             if (present_swap_begin_us >= submit_us)
-                logLatencyStats("submit_to_swap", present_swap_begin_us - submit_us);
+                logLatencyStats(CHIAKI_LATENCY_submit_to_swap, present_swap_begin_us - submit_us);
             pl_swapchain_swap_buffers(placebo_swapchain);
 
             const qint64 swap_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
@@ -5930,7 +5929,7 @@ void QmlMainWindow::processDeferredSwapTask(qint64 submit_begin_us,
                                       RenderBackend::Vulkan,
                                       true);
             if (swap_us >= present_swap_begin_us)
-                logLatencyStats("swap_call", swap_us - present_swap_begin_us);
+                logLatencyStats(CHIAKI_LATENCY_swap_call, swap_us - present_swap_begin_us);
             const qint64 observed = swap_us - submit_begin_local_us;
             if (observed > 0) {
                 const long long prev = g_submit_swap_est_us.load(std::memory_order_acquire);
@@ -6580,7 +6579,7 @@ void QmlMainWindow::render()
     render_pending_during_cycle.storeRelaxed(0);
     const qint64 schedule_us = last_schedule_update_us.loadAcquire();
     if (schedule_us > 0 && render_entry_us >= schedule_us)
-        logLatencyStats("schedule_to_render", render_entry_us - schedule_us);
+        logLatencyStats(CHIAKI_LATENCY_schedule_to_render, render_entry_us - schedule_us);
     auto snapshotRenderScheduleState = [this]() {
         QMutexLocker locker(&render_schedule_mutex);
         return qMakePair(render_scheduled, render_pending);
@@ -6602,10 +6601,10 @@ void QmlMainWindow::render()
             logUpdateToRenderStats(render_entry_us, render_entry_us - update_us);
         const qint64 dispatch_us = last_render_dispatch_us.loadAcquire();
         if (dispatch_us > 0 && render_entry_us >= dispatch_us)
-            logLatencyStats("render_dispatch_to_entry", render_entry_us - dispatch_us);
+            logLatencyStats(CHIAKI_LATENCY_render_dispatch_to_entry, render_entry_us - dispatch_us);
         const qint64 last_render_idle_us_local = last_render_idle_us.loadAcquire();
         if (last_render_idle_us_local > 0 && render_entry_us >= last_render_idle_us_local)
-            logLatencyStats("render_idle_to_entry", render_entry_us - last_render_idle_us_local);
+            logLatencyStats(CHIAKI_LATENCY_render_idle_to_entry, render_entry_us - last_render_idle_us_local);
         const qint64 request_age_us = schedule_us > 0 ? qMax<qint64>(0, render_entry_us - schedule_us) : -1;
         const qint64 idle_age_us = last_render_idle_us_local > 0 ? qMax<qint64>(0, render_entry_us - last_render_idle_us_local) : -1;
         const auto render_schedule_state = snapshotRenderScheduleState();
@@ -6679,7 +6678,7 @@ void QmlMainWindow::render()
     if (pending_frame_release_queued.loadAcquire() != 0) {
         const qint64 pending_release_queued_us = pending_frame_release_queued_us.loadAcquire();
         if (pending_release_queued_us > 0 && render_entry_us >= pending_release_queued_us) {
-            logLatencyStats("pending_release_wait_to_render", render_entry_us - pending_release_queued_us);
+            logLatencyStats(CHIAKI_LATENCY_pending_release_wait_to_render, render_entry_us - pending_release_queued_us);
         }
         if (applyPendingFrameIfQueueHasCapacity())
             pending_frame_release_queued.storeRelease(0);
@@ -7150,7 +7149,7 @@ void QmlMainWindow::render()
     if (start_frame_us >= start_frame_begin_us)
     {
         const qint64 start_frame_block_us = start_frame_us - start_frame_begin_us;
-        logLatencyStats("start_frame_block", start_frame_block_us);
+        logLatencyStats(CHIAKI_LATENCY_start_frame_block, start_frame_block_us);
         const auto render_schedule_state = snapshotRenderScheduleState();
         logRenderPhaseStall(start_frame_us,
                             "start_frame",
@@ -7184,7 +7183,7 @@ void QmlMainWindow::render()
     const qint64 render_to_start_frame_us = start_frame_begin_us;
     const qint64 render_entry_us_local = last_render_entry_us.loadAcquire();
     if (render_entry_us_local > 0 && render_to_start_frame_us >= render_entry_us_local)
-        logLatencyStats("render_to_start_frame", render_to_start_frame_us - render_entry_us_local);
+        logLatencyStats(CHIAKI_LATENCY_render_to_start_frame, render_to_start_frame_us - render_entry_us_local);
     // Submit immediately and let the swapchain / render path enforce pacing.
     auto close_started_frame = [this, timer_owned_playback, present_interval_us, start_frame_us, depth_limit, pending_frame_waiting, pending_overflow_waiting, snapshotQueueDepth, snapshotRenderScheduleState, present_submit_interval_s](bool present) -> bool {
         const qint64 submit_ready_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
@@ -7221,7 +7220,7 @@ void QmlMainWindow::render()
         }
         const bool backlog_active = pending_frame_waiting;
         if (submit_ready_us >= start_frame_us) {
-            logLatencyStats("start_frame_to_submit", submit_ready_us - start_frame_us);
+            logLatencyStats(CHIAKI_LATENCY_start_frame_to_submit, submit_ready_us - start_frame_us);
             const qint64 render_submit_us = submit_ready_us - start_frame_us;
             if (!backlog_active && present_interval_us > 0 && render_submit_us <= (present_interval_us * 2)) {
                 const qint64 prior_render_submit_estimate_us = this->render_submit_estimate_us.loadAcquire();
@@ -7272,7 +7271,7 @@ void QmlMainWindow::render()
                 else {
                     confirmVulkanStartup();
                     submit_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-            logLatencyStats("pl_swapchain_submit_frame", submit_us - submit_begin_us);
+            logLatencyStats(CHIAKI_LATENCY_pl_swapchain_submit_frame, submit_us - submit_begin_us);
             CHIAKI_NOISY_DEBUG().nospace()
                 << "[latency] pl_swapchain_submit_frame_us=" << (submit_us - submit_begin_us)
                 << " queue_depth=" << pl_queue_num_frames(placebo_queue);
@@ -7280,8 +7279,8 @@ void QmlMainWindow::render()
             if (submit_us >= submit_begin_us)
             {
                 const qint64 submit_call_us = submit_us - submit_begin_us;
-                logLatencyStats("submit_call", submit_call_us);
-                logLatencyStats("submit_frame_block", submit_call_us);
+                logLatencyStats(CHIAKI_LATENCY_submit_call, submit_call_us);
+                logLatencyStats(CHIAKI_LATENCY_submit_frame_block, submit_call_us);
                 logPresentOutlier("submit_call",
                                   submit_us,
                                   submit_call_us,
@@ -7329,7 +7328,7 @@ void QmlMainWindow::render()
             if (present && !async_present_completion) {
                 const qint64 present_swap_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
                 if (present_swap_begin_us >= submit_us)
-                    logLatencyStats("submit_to_swap", present_swap_begin_us - submit_us);
+                    logLatencyStats(CHIAKI_LATENCY_submit_to_swap, present_swap_begin_us - submit_us);
                 {
                     QMutexLocker locker(&placebo_swapchain_mutex);
                     pl_swapchain_swap_buffers(placebo_swapchain);
@@ -7351,7 +7350,7 @@ void QmlMainWindow::render()
                 if (swap_us >= present_swap_begin_us)
                 {
                     const qint64 swap_call_us = swap_us - present_swap_begin_us;
-                    logLatencyStats("swap_call", swap_call_us);
+                    logLatencyStats(CHIAKI_LATENCY_swap_call, swap_call_us);
                     logPresentOutlier("swap_call",
                                       swap_us,
                                       swap_call_us,
@@ -7367,7 +7366,7 @@ void QmlMainWindow::render()
                 }
                 const qint64 render_us = last_render_entry_us.loadAcquire();
                 if (render_us > 0 && swap_us >= render_us)
-                    logLatencyStats("render_to_swap", swap_us - render_us);
+                    logLatencyStats(CHIAKI_LATENCY_render_to_swap, swap_us - render_us);
                 // Update exponential moving average of submit+swap cost so we sleep for right amount in throttle
                 {
                     const qint64 observed = swap_us - submit_begin_us;
@@ -7594,7 +7593,7 @@ void QmlMainWindow::render()
         const qint64 render_entry_us_local = last_render_entry_us.loadAcquire();
         const qint64 render_call_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
         if (render_entry_us_local > 0 && render_call_begin_us >= render_entry_us_local)
-            logLatencyStats("render_prep", render_call_begin_us - render_entry_us_local);
+            logLatencyStats(CHIAKI_LATENCY_render_prep, render_call_begin_us - render_entry_us_local);
         if (render_call_begin_us >= render_setup_begin_us)
             logRenderSetupStats(render_call_begin_us, render_call_begin_us - render_setup_begin_us);
         const bool rendered = pl_render_image(placebo_renderer, nullptr, &target_frame, &params);
@@ -7607,9 +7606,9 @@ void QmlMainWindow::render()
         }
         const qint64 render_after_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
         if (render_after_us >= render_call_begin_us) {
-            logLatencyStats("render_image", render_after_us - render_call_begin_us);
+            logLatencyStats(CHIAKI_LATENCY_render_image, render_after_us - render_call_begin_us);
             if (render_entry_us_local > 0 && render_after_us >= render_entry_us_local)
-                logLatencyStats("render_work", render_after_us - render_entry_us_local);
+                logLatencyStats(CHIAKI_LATENCY_render_work, render_after_us - render_entry_us_local);
         }
         close_started_frame(true);
         bool scheduled_pending = finalize_render();
@@ -7730,7 +7729,7 @@ void QmlMainWindow::render()
 
     const qint64 render_call_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
     if (render_entry_us_local > 0 && render_call_begin_us >= render_entry_us_local)
-        logLatencyStats("render_prep", render_call_begin_us - render_entry_us_local);
+        logLatencyStats(CHIAKI_LATENCY_render_prep, render_call_begin_us - render_entry_us_local);
     if (render_call_begin_us >= render_setup_begin_us)
         logRenderSetupStats(render_call_begin_us, render_call_begin_us - render_setup_begin_us);
     if (!(bypass_frame_queue
@@ -7746,9 +7745,9 @@ void QmlMainWindow::render()
     {
         const qint64 render_after_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
         if (render_after_us >= render_call_begin_us) {
-            logLatencyStats("render_image", render_after_us - render_call_begin_us);
+            logLatencyStats(CHIAKI_LATENCY_render_image, render_after_us - render_call_begin_us);
             if (render_entry_us_local > 0 && render_after_us >= render_entry_us_local)
-                logLatencyStats("render_work", render_after_us - render_entry_us_local);
+                logLatencyStats(CHIAKI_LATENCY_render_work, render_after_us - render_entry_us_local);
         }
     }
     close_started_frame(true);
